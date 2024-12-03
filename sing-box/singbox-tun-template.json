@@ -108,6 +108,7 @@
             "route_exclude_address_set": [
                 "geoip-cn"
             ],
+            "endpoint_independent_nat": false,
             "udp_timeout": "5m",
             "stack": "system",
             "sniff": true,
