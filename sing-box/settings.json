@@ -1,0 +1,4 @@
+{
+    "subscribe_url": "https://example.invalid/api/v1/client/subscribe?token=REDACTED",
+    "config_template_file": "https://mirror.ghproxy.com/https://raw.githubusercontent.com/lvxj11/lvxj11PDP/refs/heads/main/sing-box/singbox-tun-template-1.10.json"
+}
