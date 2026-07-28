@@ -1,10 +1,12 @@
 :local listName "CN-IP"
+:local proxyListName "PROXY-IP"
 
-# 清除已有的列表条目
+# ========== CN-IP 地址列表 ==========
+# 清除已有的CN-IP列表条目
 /ip firewall address-list remove [find list=$listName]
 /ipv6 firewall address-list remove [find list=$listName]
 
-# 添加IPv4地址
+# 添加CN-IP IPv4地址
 /ip firewall address-list add address="1.1.8.0/24" list=$listName
 /ip firewall address-list add address="1.2.4.0/24" list=$listName
 /ip firewall address-list add address="1.8.1.0/24" list=$listName
@@ -4204,7 +4206,7 @@
 /ip firewall address-list add address="223.255.236.0/22" list=$listName
 /ip firewall address-list add address="223.255.252.0/23" list=$listName
 
-# 添加IPv6地址
+# 添加CN-IP IPv6地址
 /ipv6 firewall address-list add address="2001:250::/30" list=$listName
 /ipv6 firewall address-list add address="2001:254::/33" list=$listName
 /ipv6 firewall address-list add address="2001:255::/32" list=$listName
@@ -5813,4 +5815,31 @@
 /ipv6 firewall address-list add address="2c0f:f7a8:9041::/48" list=$listName
 /ipv6 firewall address-list add address="2c0f:f7a8:9220::/48" list=$listName
 
-:put "CN IP list updated successfully."
+# ========== PROXY-IP 地址列表 ==========
+# 清除已有的PROXY-IP列表条目
+/ip firewall address-list remove [find list=$proxyListName]
+/ipv6 firewall address-list remove [find list=$proxyListName]
+
+# 添加fake-ip-range (Clash/Mihomo fake-ip地址段)
+/ip firewall address-list add address="198.18.128.1/17" list=$proxyListName
+/ipv6 firewall address-list add address="fdfe:dcba:9876::1/64" list=$proxyListName
+
+# 添加Telegram IPv4地址
+/ip firewall address-list add address="91.108.56.0/22" list=$proxyListName
+/ip firewall address-list add address="91.108.4.0/22" list=$proxyListName
+/ip firewall address-list add address="91.108.8.0/22" list=$proxyListName
+/ip firewall address-list add address="91.108.16.0/22" list=$proxyListName
+/ip firewall address-list add address="91.108.12.0/22" list=$proxyListName
+/ip firewall address-list add address="149.154.160.0/20" list=$proxyListName
+/ip firewall address-list add address="91.105.192.0/23" list=$proxyListName
+/ip firewall address-list add address="91.108.20.0/22" list=$proxyListName
+/ip firewall address-list add address="185.76.151.0/24" list=$proxyListName
+
+# 添加Telegram IPv6地址
+/ipv6 firewall address-list add address="2001:b28:f23d::/48" list=$proxyListName
+/ipv6 firewall address-list add address="2001:b28:f23f::/48" list=$proxyListName
+/ipv6 firewall address-list add address="2001:67c:4e8::/48" list=$proxyListName
+/ipv6 firewall address-list add address="2001:b28:f23c::/48" list=$proxyListName
+/ipv6 firewall address-list add address="2a0a:f280::/32" list=$proxyListName
+
+:put "CN-IP and PROXY-IP lists updated successfully."
