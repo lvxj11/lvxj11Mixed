@@ -91,3 +91,7 @@ proxy_providers/
 # 系统文件
 *.pid
 *.sock
+
+# 私有配置（含真实设备 MAC / 主机名，不要提交）
+imagebuilder/24.10/files-full/etc/custom-scripts/dhcp
+imagebuilder/24.10/files-full/etc/uci-defaults/lvxj50-private.sh
