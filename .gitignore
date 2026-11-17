@@ -92,6 +92,9 @@ proxy_providers/
 *.pid
 *.sock
 
+# Alpine 安装脚本读取的外部公钥（真实公钥不入库）
+Alpine/authorized_keys
+
 # 私有配置（含真实设备 MAC / 主机名，不要提交）
 imagebuilder/24.10/files-full/etc/custom-scripts/dhcp
 imagebuilder/24.10/files-full/etc/uci-defaults/lvxj50-private.sh

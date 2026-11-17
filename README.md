@@ -1,12 +1,12 @@
 # lvxj11Mixed
 
-家用网络 / 代理相关的脚本与配置集合：Alpine 系统安装、mihomo / sing-box 旁路网关、OpenWrt / ImmortalWrt 定制固件构建、RouterOS 中国 IP 列表生成等。
+家用网络 / 代理相关的脚本与配置集合：Alpine 系统部署、mihomo / sing-box 旁路网关、OpenWrt / ImmortalWrt 定制固件构建、RouterOS 中国 IP 列表生成等。
 
 ## 目录
 
 | 目录 | 用途 | 说明 |
 |------|------|------|
-| [Alpine/](Alpine/README.md) | Alpine 系统安装 | 在 PVE 等虚拟化环境里无人值守装好 Alpine 基础系统 |
+| [Alpine/](Alpine/README.md) | Alpine 系统部署 | **推荐 cloud-init 方式**导入官方云镜像；传统 ISO 安装脚本保留为 legacy 备选 |
 | [Mihomo/](Mihomo/README.md) | mihomo 旁路网关 | 在已装好的 Alpine 上部署 mihomo + nftables + TUN |
 | [sing-box/](sing-box/readme.md) | sing-box 部署 | Alpine 上部署 sing-box 1.11，订阅转换与自动更新 |
 | [imagebuilder/](imagebuilder/README.md) | 定制固件构建 | 用 Docker ImageBuilder 生成带 nikki 的 x86-64 旁路由固件 |
@@ -27,5 +27,6 @@ cd imagebuilder/25.12-immortalwrt
 ## 说明
 
 - 各子目录的 README 是各自的权威说明，本文件只做索引。
-- 脚本里的订阅地址、SSH 公钥等均为占位符，使用前按各 README 替换。
+- Alpine 部署提供两种方式：推荐 [PVE 9.x cloud-init 方式](Alpine/PVE9-cloud-init.md)（GUI / CLI 两套，默认 `alpine` 用户），[传统 ISO 安装脚本](Alpine/setup-alpine.sh) 保留为 legacy 备选。
+- 脚本里的订阅地址、SSH 公钥等均为占位符，使用前按各 README 替换；cloud-init 方式的公钥由 PVE 注入，不写入仓库。
 - 本仓库公开，请勿提交订阅地址、密钥、设备 MAC / 主机名等私有信息；相关路径已在 `.gitignore` 中忽略。

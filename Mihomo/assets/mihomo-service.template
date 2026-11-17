@@ -10,13 +10,13 @@ error_log="/var/log/mihomo/mihomo.log"
 
 depend() {
     need net
-    after firewall
+    after nftables
     use logger
 }
 
 start_pre() {
-    checkpath --directory --mode 0755 /run/mihomo
-    checkpath --directory --mode 0755 /var/lib/mihomo
+    # -d /etc/mihomo 让 mihomo 的数据（proxy_providers / ui / cache）都落在配置目录，
+    # 这里只需准备日志目录；/run/mihomo、/var/lib/mihomo 是用不到的空目录，不再创建。
     checkpath --directory --mode 0755 /var/log/mihomo
     # 设置最大文件描述符数
     ulimit -n 1048576

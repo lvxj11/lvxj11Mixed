@@ -32,6 +32,10 @@ table inet filter {
         ip protocol icmp accept
 
         # ICMPv6（精确）
+        # ND 相关类型已覆盖邻居发现与路由通告。本环境是纯单播旁路由，
+        # 不跑组播路由 / 组播应用，因此不放行 MLD（mld2-listener-report 等）
+        # 与 nd-router-solicit；若将来启用 IPTV 等组播应用，或启用 radvd 且
+        # 依赖 RS 触发 RA，再按需补上对应类型。
         icmpv6 type {
             destination-unreachable,
             packet-too-big,
@@ -61,7 +65,13 @@ table inet filter {
     }
 }
 
-# NAT 表 - IP 伪装
+# NAT 表 - IP 动态伪装（IPv4 + IPv6 双栈，旁路网关必需）
+#
+# table inet 会让 masquerade 同时作用于 IPv4 和 IPv6（Linux >= 5.2）。
+# 旁路由必须双栈都做伪装：否则经本机转发的 IPv6 流量源地址仍是客户端地址，
+# 回包会被主路由直接送回客户端、绕过本机，形成非对称路由（能 ping 通但网页打不开）。
+# 所以这里不要加 "meta nfproto ipv4" 限定，也不要把 table inet 改成 table ip。
+# masquerade 是「动态」的：出口前缀变化（如 DHCPv6-PD 重拨）时自动跟随，无需改规则。
 table inet nat {
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;

@@ -1,6 +1,35 @@
 #!/bin/bash
 set -e
 
+# 镜像格式档位（详见 imagebuilder/README.md 的「镜像格式档位」一节）
+#   默认 minimal：仅 ext4 EFI 的 qcow2（未压缩，可直接导入 PVE），并清理本次附带产出的 raw
+#   -c / --common：ext4 常用格式（qcow2 + raw、EFI + BIOS，均 gzip 压缩），不清理产物
+#   -a / --all：上游全部格式（含 squashfs / iso / vdi / vmdk / vhdx / targz），不清理产物
+IMAGE_FORMATS=minimal
+set_format() {
+    if [ "$IMAGE_FORMATS" != "minimal" ] && [ "$IMAGE_FORMATS" != "$1" ]; then
+        echo "错误: -c/--common 与 -a/--all 不能同时使用" >&2
+        exit 1
+    fi
+    IMAGE_FORMATS="$1"
+}
+for arg in "$@"; do
+    case "$arg" in
+        -c|--common) set_format common ;;
+        -a|--all)    set_format all ;;
+        -h|--help)
+            echo "用法: $0 [-c|--common] [-a|--all]"
+            echo "  无参数    默认 minimal：仅 ext4 EFI qcow2（未压缩，可直接导入 PVE）"
+            echo "  -c|--common  常用格式：ext4 的 qcow2 + raw、EFI + BIOS，均 gzip 压缩"
+            echo "  -a|--all     全部格式：上游支持的全部镜像格式"
+            exit 0 ;;
+        *)
+            echo "错误: 未知参数 '$arg'（可用: -c/--common, -a/--all, -h/--help）" >&2
+            exit 1 ;;
+    esac
+done
+echo "镜像格式档位: $IMAGE_FORMATS"
+
 VERSION='x86-64-openwrt-25.12'
 QUERY_URL="https://hub.docker.com/v2/repositories/immortalwrt/imagebuilder/tags?name=${VERSION}&page_size=50"
 
@@ -51,6 +80,7 @@ if [ -t 0 ]; then
 fi
 
 docker run --rm "${TTY_ARGS[@]}" --name imagebuilder \
+    -e "IMAGE_FORMATS=${IMAGE_FORMATS}" \
     -v ./output:/output \
     -v ./builder-bypass/files:/builder/files \
     -v ./builder-bypass/build.sh:/builder/build.sh \

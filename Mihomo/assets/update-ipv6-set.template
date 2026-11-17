@@ -1,0 +1,64 @@
+#!/bin/sh
+set -e
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# 与主安装脚本一致：优先取默认路由所在网卡，再退回「第一个非虚拟网卡」
+PRIMARY_IFACE=$(ip -o -4 route show default 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n 1)
+if [ -z "${PRIMARY_IFACE}" ]; then
+    PRIMARY_IFACE=$(ip -o -6 route show default 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "dev") print $(i+1)}' | head -n 1)
+fi
+if [ -z "${PRIMARY_IFACE}" ]; then
+    PRIMARY_IFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$' \
+        | grep -vE '^(tun|tap|veth|docker|br-|virbr|wg|ppp)' | head -n 1)
+fi
+if [ -z "${PRIMARY_IFACE}" ]; then
+    log "错误: 无法检测到网卡"
+    exit 1
+fi
+
+if ! nft list set inet filter local_ipv6_list > /dev/null 2>&1; then
+    log "错误: 没找到 local_ipv6_list 集合（nftables 规则是否已加载？）"
+    exit 1
+fi
+
+SET_LIST=$(nft list set inet filter local_ipv6_list 2>/dev/null)
+
+# 提取所有以 2 开头的 IPv6 直连前缀（公网段），逐个维护
+NETWORKS=$(ip -6 route show dev "${PRIMARY_IFACE}" | awk '$1 ~ /^2/ {print $1}' | sort -u)
+if [ -z "${NETWORKS}" ]; then
+    log "未找到以 2 开头的 IPv6 直连网段"
+    exit 0
+fi
+
+for NETWORK in ${NETWORKS}; do
+    # nft 的 list set 可能把所有元素排在同一行，用 grep 取整行会拿到别的
+    # 网段的 expires；这里按「该网段之后、下一个逗号或右花括号之前」精确截取
+    ELEMENT_INFO=$(echo "${SET_LIST}" | tr '\n' ' ' | \
+        sed -n "s|.*${NETWORK}\([^,}]*\).*|\1|p")
+
+    if [ -n "${ELEMENT_INFO}" ]; then
+        # nft 的剩余时间格式不固定：23h59m58s / 1d2h / 45m / 30s 都要认，
+        # 统一换算成秒再判断，避免旧版只认三段格式导致「45m」被误判为充足
+        EXPIRES_STR=$(echo "${ELEMENT_INFO}" | grep -oE 'expires [0-9dhms]+' | head -n 1 | cut -d' ' -f2)
+        DAYS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+d' | tr -d 'd')
+        HOURS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+h' | tr -d 'h')
+        MINS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+m' | tr -d 'm')
+        SECS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+s' | tr -d 's')
+        REMAINING=$(( ${DAYS:-0} * 86400 + ${HOURS:-0} * 3600 + ${MINS:-0} * 60 + ${SECS:-0} ))
+
+        if [ "${REMAINING}" -ge 7200 ]; then
+            log "网段 ${NETWORK} 已存在，剩余 ${EXPIRES_STR}（>= 2h），跳过"
+            continue
+        fi
+        log "网段 ${NETWORK} 剩余时间不足 2 小时（${EXPIRES_STR:-无法解析}），刷新超时..."
+        nft "delete element inet filter local_ipv6_list { ${NETWORK} }" 2>/dev/null || true
+    fi
+
+    log "添加 IPv6 网段: ${NETWORK}"
+    nft "add element inet filter local_ipv6_list { ${NETWORK} timeout 24h }"
+done
+
+exit 0

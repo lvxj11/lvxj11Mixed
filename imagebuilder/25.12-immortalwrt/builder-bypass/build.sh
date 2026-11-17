@@ -13,11 +13,35 @@ if [ ! -f Makefile ]; then
     exit 1
 fi
 
-# 不生成ext4文件系统镜像
-# sed -i '/^CONFIG_TARGET_ROOTFS_EXT4FS/d' .config
+# 镜像格式档位（由 docker-build-bypass.sh 通过 -e IMAGE_FORMATS 传入；单独执行时默认 minimal）：
+#   minimal - 默认：仅 ext4 + EFI + qcow2，关闭 gzip 得到未压缩、可直接导入 PVE 的 .qcow2
+#   common  - 常用：ext4 全变体（qcow2 + raw、EFI + BIOS），开启 gzip 压缩
+#   all     - 全部：保留上游 .config 全部格式（含 squashfs / iso / vdi / vmdk / vhdx / targz）
+# 上游 .config 里 CONFIG_QCOW2_IMAGES=y 已开启，三档都保留它。
+IMAGE_FORMATS="${IMAGE_FORMATS:-minimal}"
+case "$IMAGE_FORMATS" in
+    minimal|common|all) ;;
+    *)
+        echo "错误: 未知 IMAGE_FORMATS='$IMAGE_FORMATS'（只接受 minimal / common / all）" >&2
+        exit 1
+        ;;
+esac
+echo "镜像格式档位: $IMAGE_FORMATS"
 
-# 只保留 raw (.img.gz) 磁盘镜像，取消其它打包格式（PVE 使用 ext4 raw 导入）
-sed -i -E '/^CONFIG_(ISO|QCOW2|VDI|VMDK|VHDX)_IMAGES=/d' .config
+case "$IMAGE_FORMATS" in
+    minimal)
+        # 关 gzip（否则 qcow2 会被压成 .qcow2.gz，不能直接导入）、关 BIOS 变体（只留 EFI）、
+        # 去掉 squashfs / targz / ISO / VDI / VMDK / VHDX
+        sed -i -E '/^CONFIG_(ISO|VDI|VMDK|VHDX)_IMAGES=/d; /^CONFIG_(TARGET_ROOTFS_SQUASHFS|TARGET_ROOTFS_TARGZ|TARGET_IMAGES_GZIP|GRUB_IMAGES)=/d' .config
+        ;;
+    common)
+        # 保留 gzip 与 EFI / BIOS 两种引导，去掉 squashfs / targz / ISO / VDI / VMDK / VHDX
+        sed -i -E '/^CONFIG_(ISO|VDI|VMDK|VHDX)_IMAGES=/d; /^CONFIG_(TARGET_ROOTFS_SQUASHFS|TARGET_ROOTFS_TARGZ)=/d' .config
+        ;;
+    all)
+        # 不做裁剪，保留上游 .config 的全部格式开关
+        ;;
+esac
 
 # 更换为国内镜像源（南大镜像实测最快；稳定性不足时可切中科大 mirrors.ustc.edu.cn）
 sed -i 's|https://downloads.immortalwrt.org|https://mirror.nju.edu.cn/immortalwrt|g' repositories
@@ -94,3 +118,21 @@ cp -a keys/. "$RUNTIME_FILES/etc/apk/keys/"
 # 开始生成镜像（使用相对路径，适配非Docker环境）
 # 装包失败时 make 会以非 0 退出，配合 set -e 直接中止，无需额外自检
 make V=s image PACKAGES="$PACKAGES" FILES="$RUNTIME_FILES" BIN_DIR=/output ROOTFS_PARTSIZE="800"
+
+# 默认档（minimal）清理：Makefile 的 IMAGES-y 会无条件附带产出 raw *.img，关掉 gzip 后
+# 这些是未压缩的大文件（combined-efi.img + rootfs.img，约 1.6 GB），对 PVE 无用且浪费空间。
+# 只删除「本次 sha256sums 里列出的」raw 磁盘镜像并同步校验文件，保留 qcow2 与构建元数据；
+# output/ 里历史遗留的任何文件都不在本次 sha256sums 中，因此绝不会被触碰。
+if [ "$IMAGE_FORMATS" = "minimal" ]; then
+    SUMS=/output/sha256sums
+    if [ -f "$SUMS" ]; then
+        RAW_LIST=$(awk '{print $2}' "$SUMS" | sed 's/^\*//' | grep -E '\.img$' || true)
+        if [ -n "$RAW_LIST" ]; then
+            printf '%s\n' "$RAW_LIST" | while IFS= read -r name; do
+                [ -n "$name" ] && rm -f "/output/$name"
+            done
+        fi
+        awk '$2 !~ /\.img$/ {print}' "$SUMS" > "$SUMS.tmp" && mv "$SUMS.tmp" "$SUMS"
+        echo "已清理本次附带的 raw 磁盘镜像，仅保留 qcow2 与构建元数据。"
+    fi
+fi

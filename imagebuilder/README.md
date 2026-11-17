@@ -33,10 +33,12 @@
 在 `25.12-immortalwrt/` 目录下手动执行（脚本自动判断 TTY，终端里可交互、可 Ctrl+C）：
 
 ```bash
-./docker-build-bypass.sh
+./docker-build-bypass.sh          # 默认：只产出 ext4 EFI 的 qcow2（可直接导入 PVE）
+./docker-build-bypass.sh -c       # 常用格式：ext4 的 qcow2 + raw、EFI + BIOS（gzip 压缩）
+./docker-build-bypass.sh -a       # 全部格式：上游支持的所有镜像格式
 ```
 
-产物落在 `output/`。依赖：宿主机有 Docker、`curl`；构建期需能访问南大镜像、Docker Hub 与 `nikkinikki.pages.dev`。
+产物落在 `output/`。依赖：宿主机有 Docker、`curl`；构建期需能访问南大镜像、Docker Hub 与 `nikkinikki.pages.dev`。格式档位见下节。
 
 ## 构建流程
 
@@ -48,7 +50,7 @@
 
 ### 2. 容器内 `build.sh`
 
-1. **裁剪镜像格式**：从 `.config` 删除 ISO / QCOW2 / VDI / VMDK / VHDX 打包格式，只保留用于 PVE 导入的 ext4 / squashfs raw 磁盘镜像。
+1. **按档位裁剪镜像格式**：读 `IMAGE_FORMATS` 环境变量（由入口脚本 `-e` 传入），从 `.config` 增删格式开关。详见本文「镜像格式档位」一节。
 2. **换国内源**：把 `repositories` 里的官方地址替换为南大镜像（实测最快；不稳时可换中科大 `mirrors.ustc.edu.cn`）。
 3. **自定义软件包**：`-dnsmasq + dnsmasq-full`、TPROXY 相关内核模块（`kmod-nft-socket` / `kmod-nft-tproxy`）、常用工具与 LuCI 中文语言包等。
 4. **nikki 源与公钥**：最多下载 3 次公钥 `public-key.pem`；**仍失败则醒目报错并 `exit 1`，绝不静默跳过 nikki** —— 否则会产出「构建成功、校验和齐全、却完全没有 nikki」的固件。成功后把 nikki 源追加进 `repositories`，并追加 `luci-app-nikki` / `luci-i18n-nikki-zh-cn` 两个包。
@@ -57,6 +59,7 @@
    - `repositories` 按是否含 `nikki` 拆成 `distfeeds.list`（7 条官方源，已是南大地址）与 `customfeeds.list`（nikki 源）
    - `keys/`（官方 2 个 + 本次下载的 `nikki.pem`）整个复制进 `/etc/apk/keys/`
 6. **生成镜像**：`make V=s image ... FILES=/tmp/ib-runtime-files BIN_DIR=/output ROOTFS_PARTSIZE=800`。装包失败时 `make` 非 0 退出，配合 `set -e` 直接中止。
+7. **默认档清理**：`minimal` 档在构建后精确删除本次附带产出的 raw `*.img` 并同步 `sha256sums`，只保留 qcow2 与构建元数据。
 
 ### 3. 两套软件源（容易混淆）
 
@@ -83,6 +86,24 @@
 
 > 补丁版本 25.12.2 → 25.12.3 由入口脚本自动查询、distfeeds 自动跟随，无需手动改任何文件。`FEED_URL` 里的 `openwrt-25.12` 是 nikki feed 的大版本分支，跨大版本升级时才需同步。
 
+## 镜像格式档位
+
+只在 PVE 使用，日常只需要一个 ext4 qcow2；用不到的格式靠参数按需产出。三档由 `docker-build-bypass.sh` 的 `-c` / `-a` 选择，通过 `-e IMAGE_FORMATS` 传给容器内的 `build.sh`。
+
+| 档位 | 命令 | 产出 | 压缩 | 清理 |
+|------|------|------|------|------|
+| **minimal**（默认） | `./docker-build-bypass.sh` | 仅 `ext4-combined-efi.qcow2` **1 个**磁盘镜像 + 元数据 | **关**（`.qcow2` 未压缩，可直接导入） | **是**：删本次 raw，只留 qcow2 |
+| **common** | `./docker-build-bypass.sh -c`（或 `--common`） | ext4 全变体：`combined` / `combined-efi` 的 qcow2 + raw，以及 `rootfs.img.gz` | 开（ext4 产物带 `.gz`） | 否 |
+| **all** | `./docker-build-bypass.sh -a`（或 `--all`） | 上游全部格式：上述 ext4 + squashfs 组合镜像、rootfs 归档、ISO / VDI / VMDK / VHDX | 开（ext4 产物带 `.gz`；squashfs 的 qcow2/vdi/vmdk/vhdx 按上游规则不压缩） | 否 |
+
+**为什么默认关压缩**：上游 `CONFIG_TARGET_IMAGES_GZIP=y` 会把 qcow2 也 gzip 成 `.qcow2.gz`，导入前还得解压，正好违背 qcow2「免解压直接导入」的优势。默认档关掉它，拿到的是未压缩、稀疏（约 48 MiB）、PVE 9.x GUI 可直接上传导入的 `.qcow2`。
+
+**为什么默认要清理**：raw `*.img` 是 Makefile 里 `IMAGES-y` 无条件生成的，删 `.config` 格式开关去不掉；关掉 gzip 后这些 raw 是**未压缩**的（`combined-efi.img` + `rootfs.img` 合计约 1.6 GB），对 PVE 无用且浪费空间。清理只依据**本次生成的 `sha256sums`** 精确定位文件，同步移除对应校验行，因此 `output/` 里历史遗留的任何镜像都不会被误删；`sha256sum -c sha256sums` 仍全部通过。`common` / `all` 两档不清理，且保留 gzip 压缩，raw 是 `.img.gz`（约 48 MiB）不会撑大磁盘。
+
+**引导变体**：默认档只保留 EFI（`combined-efi.qcow2`，对应 PVE 的 OVMF / q35）。若要用 SeaBIOS，加 `-c` 或 `-a` 产出带 MBR 的 `combined.*` 变体。`-c` 与 `-a` 互斥，同时给会报错退出。
+
+> 想直接在容器外单独跑 `build.sh` 时，可用 `IMAGE_FORMATS=common bash build.sh` 指定档位，默认 `minimal`。
+
 ## 自定义配置（files/）
 
 | 文件 | 作用 |
@@ -94,13 +115,13 @@
 
 ## 产物（output/）
 
-`output/` 被 `.gitignore` 忽略，只在本地保留。一次构建会生成：
+`output/` 被 `.gitignore` 忽略，只在本地保留。具体清单随镜像格式档位变化（见上节），各档都会带的构建元数据：
 
-- `*.img.gz`：ext4 / squashfs 的 combined（含 `-efi`）磁盘镜像，PVE 用 ext4 raw 导入
-- `*-rootfs.tar.gz` / `*-targz-rootfs.tar.gz`：rootfs 归档
 - `*-kernel.bin`：内核
 - `*.manifest`：本次实际安装的软件包清单
 - `sha256sums`、`profiles.json`、`*.bom.cdx.json`：校验和、profile 信息、SBOM
+
+默认档只额外保留一个 `*-ext4-combined-efi.qcow2`（未压缩），导入 PVE 用 `qm set <vmid> --scsi0 <storage>:0,import-from=<path>` 或在 PVE 9.x GUI 从 `Import` 存储直接上传导入；`-c` / `-a` 档的 ext4 `.gz` 镜像需先 `gunzip`。
 
 ## 常见问题
 
