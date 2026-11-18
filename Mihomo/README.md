@@ -156,10 +156,10 @@ nftables 防火墙与 NAT 规则配置。
   - 改 `dns.listen` 从 `53` 到 `1053` 是这条劫持的**前提**：1053 上必须有东西在听（mihomo 自己），否则 DNS 请求会被劫到没人接的端口、直接超时失败
   - `input` 链**无需**为 1053 额外放行：redirect 后目标端口是 1053，但包仍从 eth0 进入，仍命中 input 链里的私网放行规则；若客户端源不在放行集合，53 同样不会被放行——行为与劫持前一致，不额外开洞
 
-**迁移注意（上游用 RouterOS / mangle mark 分流时）**：
-- 必须**删除**上游原有的 `dst-nat`（TCP + UDP，53 → mihomo 网关）规则，改由 mark 分流把「目的 53」的 DNS 也送到 mihomo 网关（端口改写下沉到网关内 nftables 完成）
-- 这样 DNS 与普通流量在上游只需**一套 mark 逻辑**，改 mihomo 网关地址时只改路由/网关 IP 一处，不必再同步改 dnat(tcp) + dnat(udp) 两条规则
-- 注意别让上游把「目的 53」单独排除在 mark 分流之外（否则 DNS 走不到网关，劫持就失效）
+**迁移说明（上游用 RouterOS / mangle mark 分流时）**：
+- 上游原有的 `dst-nat`（TCP + UDP，53 → mihomo 网关）**不删也能正常工作**：`redirect` 只匹配「eth0 进 + dport 53」，不看目的 IP 是谁——无论包是被 dst-nat 改写成 `mihomo-gw:53`、还是原目的 `任意IP:53`，到网关后目的端口都是 53，照样命中 redirect → 1053。两种状态功能等价
+- 若要实现「DNS 与普通流量在上游统一成**一套 mark 逻辑**、改网关地址只改路由一处」，则应**删除** dst-nat、改由 mark 分流把「目的 53」也送到网关（端口改写下沉到网关内 nftables 完成）；保留 dst-nat 只是保留了原来的三处配置负担，不影响劫持生效
+- 注意别让上游把「目的 53」单独排除在 mark 分流之外（若已删 dst-nat 走 mark，这条 DNS 就走不到网关、劫持失效）
 
 **验证命令**：
 ```bash
@@ -274,7 +274,7 @@ API 密钥为 `config.yaml` 里的 `secret`（默认 `CHANGE_ME`，请修改）�
 | mihomo 无法启动 | 脚本会直接报错退出；`tail /var/log/mihomo/mihomo.log` |
 | 防火墙规则 | `nft list ruleset` |
 | 确认双栈伪装是否生效 | `nft list table inet nat` |
-| DNS 劫持不生效（`dig @<网关IP>` 返回真 IP 或超时） | `nft list ruleset \| grep redirect` 确认规则存在；`ss -lunp \| grep 1053` 确认 mihomo 在听 1053；检查上游是否已删除 dst-nat(53) 规则、DNS 是否确实被 mark 分流到网关 |
+| DNS 劫持不生效（`dig @<网关IP>` 返回真 IP 或超时） | `nft list ruleset \| grep redirect` 确认规则存在；`ss -lunp \| grep 1053` 确认 mihomo 在听 1053；确认 DNS 是否真的被送到了网关——若已删 dst-nat 改走 mark，检查「目的 53」是否仍被 mark 分流到网关（没到网关劫持自然失效）；若保留 dst-nat，确认它指向网关且 dport 为 53 |
 | TUN 模块 | `lsmod | grep tun` |
 | 网络连接 | `ping -c 4 223.5.5.5` |
 | IPv6 网段 | `ip -6 route show` |
