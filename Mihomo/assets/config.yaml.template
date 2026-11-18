@@ -42,7 +42,11 @@ dns:
   fallback-filter:
     geoip: true
     ipcidr: [240.0.0.0/4, 0.0.0.0/32]
-  listen: '[::]:53'
+  # 监听 1053 而非 53：53 端口的入站 DNS 由 nftables 在 prerouting 里 redirect 到 1053。
+  # 原因：网关侧的 dns-hijack 只作用于经 tun0 进入的流量，而 LAN/上游经 eth0 送来、
+  # 目的 IP 是网关自身:53 的 DNS 不走 tun，靠这条 redirect 劫持到本机 1053 上的 mihomo。
+  # 双栈通用：inet 表一条 redirect 规则同时覆盖 IPv4/IPv6 的 53。
+  listen: '[::]:1053'
   fake-ip-filter:
     - RULE-SET,dns_real_ip,real-ip
     - RULE-SET,custom_proxy_domain,fake-ip
@@ -144,6 +148,9 @@ tun:
   enable: true
   device: tun0
   stack: mixed
+  # 本机自产 DNS（如 mihomo 自身、本机进程）经 tun0 时在此被接管，与 nftables
+  # prerouting 的「eth0 入站 53 → 1053」分工不同、互不重复：那条管外部经网关转发的
+  # DNS，这条管本机发出的 DNS。两者都指向同一个 mihomo DNS 实例（1053）。
   dns-hijack:
     - any:53
     - tcp://any:53

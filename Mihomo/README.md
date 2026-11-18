@@ -46,7 +46,7 @@
 
 ### 1. install-mihomo-alpine.sh
 
-Alpine 系统 mihomo 旁路网关一键安装脚本（v1.5.1）。
+Alpine 系统 mihomo 旁路网关一键安装脚本（v1.6.0）。
 
 **主要功能**：
 - 更换官方源为南大镜像（只换域名、补 community）、`apk update` + `apk upgrade`，升级后复查内核、需要重启则提示退出；一次装好全部随附工具（见「随附工具」）；不装 radvd
@@ -150,6 +150,23 @@ nftables 防火墙与 NAT 规则配置。
 - `nat` 表对出口 `eth0` 做 `masquerade`，**同时作用于 IPv4 和 IPv6**
   - `table inet` 让 `masquerade` 双栈生效（Linux >= 5.2）。旁路由必须双栈都做伪装：否则经本机转发的 IPv6 流量源地址仍是客户端地址，回包会被主路由直接送回客户端、绕过本机，形成非对称路由（能 ping 通但网页打不开）。因此**不要**加 `meta nfproto ipv4` 限定，也不要把 `table inet` 改成 `table ip`
   - `masquerade` 是「动态」的：出口前缀变化（如 DHCPv6-PD 重拨）时自动跟随，无需改规则；`update-ipv6-set` 维护的是 input 链的允许集合，与它不是一回事
+- `nat` 表 `prerouting` 链做 **DNS 劫持（53 → 1053，双栈）**
+  - 规则：`iifname "eth0" meta l4proto { tcp, udp } th dport 53 redirect to :1053`。用 `redirect`（`redirect to :<port>`）而不是 DNAT：它是「目的地址 = 本机」的 DNAT 特例（内核 ≥ 3.19，inet 表 NAT 需 ≥ 5.2），只改端口、不改地址族，所以一条 inet 规则就同时覆盖 IPv4 + IPv6，无需分别写 `ip/ip6` 两个目标地址。`redirect to 1053`（无冒号）同样合法、功能一致，这里用带冒号写法与 `nft list ruleset` 回显及 man page 示例保持一致
+  - **与 `tun.dns-hijack` 的分工**：`dns-hijack` 只作用于**已进入 tun0** 的流量，`auto-redirect` 只作用于**本机转发**的流量，两者都覆盖不到「经 eth0 进入、目的端口 53、目的 IP 是原值」这条路径——而当上游用策略路由把 DNS 按 mark 送到网关时，DNS 包正是走这条路，mihomo 不会接管。这条 prerouting 规则补的就是这一段。两者不重复、不冲突
+  - 改 `dns.listen` 从 `53` 到 `1053` 是这条劫持的**前提**：1053 上必须有东西在听（mihomo 自己），否则 DNS 请求会被劫到没人接的端口、直接超时失败
+  - `input` 链**无需**为 1053 额外放行：redirect 后目标端口是 1053，但包仍从 eth0 进入，仍命中 input 链里的私网放行规则；若客户端源不在放行集合，53 同样不会被放行——行为与劫持前一致，不额外开洞
+
+**迁移注意（上游用 RouterOS / mangle mark 分流时）**：
+- 必须**删除**上游原有的 `dst-nat`（TCP + UDP，53 → mihomo 网关）规则，改由 mark 分流把「目的 53」的 DNS 也送到 mihomo 网关（端口改写下沉到网关内 nftables 完成）
+- 这样 DNS 与普通流量在上游只需**一套 mark 逻辑**，改 mihomo 网关地址时只改路由/网关 IP 一处，不必再同步改 dnat(tcp) + dnat(udp) 两条规则
+- 注意别让上游把「目的 53」单独排除在 mark 分流之外（否则 DNS 走不到网关，劫持就失效）
+
+**验证命令**：
+```bash
+nft list ruleset | grep -A2 'hook prerouting'    # 确认 redirect 规则在
+ss -lunp | grep 1053                              # 确认 mihomo 在听 1053
+dig @<网关IP> example.com                          # 返回 fake-ip 即说明劫持生效
+```
 
 脚本会先备份已有 `/etc/nftables.nft` 为 `.bak.<时间戳>` 再覆盖，并按实际网卡名替换规则中的 `eth0`。
 
@@ -257,6 +274,7 @@ API 密钥为 `config.yaml` 里的 `secret`（默认 `CHANGE_ME`，请修改）�
 | mihomo 无法启动 | 脚本会直接报错退出；`tail /var/log/mihomo/mihomo.log` |
 | 防火墙规则 | `nft list ruleset` |
 | 确认双栈伪装是否生效 | `nft list table inet nat` |
+| DNS 劫持不生效（`dig @<网关IP>` 返回真 IP 或超时） | `nft list ruleset \| grep redirect` 确认规则存在；`ss -lunp \| grep 1053` 确认 mihomo 在听 1053；检查上游是否已删除 dst-nat(53) 规则、DNS 是否确实被 mark 分流到网关 |
 | TUN 模块 | `lsmod | grep tun` |
 | 网络连接 | `ping -c 4 223.5.5.5` |
 | IPv6 网段 | `ip -6 route show` |
