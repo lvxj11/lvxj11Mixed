@@ -15,7 +15,7 @@
 - 换源后执行 `apk update` + `apk upgrade`。若源指向 `latest-stable` / `edge` 滚动版本会直接报错退出（避免跨大版本）；cloud-init 镜像若只启用 main，会自动补上 community（`yq-go` 等包在 community）
 - 优先取默认路由所在网卡（排除 `tun` / `veth` / `docker` 等虚拟接口），并把各模板里的 `eth0` 替换成实际网卡名
 - `assets/` 里的文件都是必需的：缺失一律报错退出，不会「警告后继续」产出残缺系统。请从脚本所在目录连同 `assets/` 一起取用，不要只拷脚本
-- 安装后 mihomo 以「最简可启动」配置启动（面板可访问、TUN / DNS 接管就绪）；正式配置（订阅 / 节点 / 规则）与 `secret` 需自行编辑 `/etc/mihomo/config.yaml`，详见第 2 节
+- 安装后 mihomo 以「最简可启动」配置启动（面板免认证可访问、TUN / DNS 接管就绪）；正式配置（订阅 / 节点 / 规则）与 `secret` 需自行补进 `/etc/mihomo/config.yaml`，详见第 2 节
 
 ## 随附工具
 
@@ -95,13 +95,14 @@ mihomo **最简可启动**配置模板（已用 `mihomo -t` 校验通过，v1.19
 | 项 | 值 |
 |----|----|
 | `external-controller` | `[::]:9090` |
-| `secret` | `CHANGE_ME`（**务必修改**） |
+| `secret` | `""`（留空，首次打开面板免认证；**正式部署务必设置**） |
 | `mixed-port` | `7892` |
 | `dns.listen` | `[::]:53`（与 `tun.dns-hijack: any:53` 匹配，**不要改成 1053**） |
 
 **注意**：
 - 脚本安装后 mihomo 即用此最简配置启动、面板可访问；正式配置（订阅 / 节点 / 规则集）自行编辑 `/etc/mihomo/config.yaml` 后 `rc-service mihomo restart`
-- 脚本**不会覆盖已存在的** `config.yaml`：你改过的正式配置在重装脚本时保留
+- `secret` 默认留空：官方行为是「只有定义了 `secret` 才需要 `Authorization` 头」，所以首次打开 `http://<服务器IP>:9090` 不用填密钥。**正式部署务必设置**：控制器绑 `[::]:9090` 且 `allow-lan: true`，空密钥等同同网段任何人都能读写配置、切换节点
+- 脚本**不会覆盖已存在的** `config.yaml`：你改过的正式配置（含设好的 `secret`）在重装脚本时保留
 - `proxies` 里不能用 mihomo 保留名 `DIRECT`（会报 `proxy DIRECT is the duplicate name`），故模板里直连代理命名为「直连」
 
 ### 3. assets/sysctl.conf.template
@@ -220,7 +221,7 @@ mihomo 日志轮转配置：`daily` 轮转、保留 7 份、`compress` + `delayc
    ./install-mihomo-alpine.sh
    ```
 3. **配置 mihomo**：
-   - 编辑 `/etc/mihomo/config.yaml`，添加订阅 / 节点 / 代理组 / 规则，并修改 `secret`
+   - 编辑 `/etc/mihomo/config.yaml`，添加订阅 / 节点 / 代理组 / 规则，并设置 `secret`（模板默认留空，首次打开面板无需密钥）
    - 重启服务：`rc-service mihomo restart`
 4. **（可选）IPv6 路由通告**：本方案默认不启用，见第 6 节
 
@@ -251,7 +252,7 @@ tail -f /var/log/mihomo/mihomo.log
 http://<服务器IP>:9090
 ```
 
-API 密钥为 `config.yaml` 里的 `secret`（默认 `CHANGE_ME`，请修改），外部 UI 为 Zashboard。
+首次安装 `secret` 为空，打开页面无需填密钥即可直接使用（官方行为：未定义 `secret` 就不校验 `Authorization`）。**正式部署务必在 `config.yaml` 里设置 `secret`** —— 控制器绑在 `[::]:9090` 且 `allow-lan: true`，留空等于把读写配置、切换节点的权限开放给同网段所有人。外部 UI 为 Zashboard。
 
 ## 系统要求
 

@@ -10,7 +10,8 @@
 # 所以这里的直连代理命名为「直连」。
 #
 # 保留面板 UI 配置（external-controller / secret / external-ui-*），
-# 启动后即可访问 http://<服务器IP>:9090（secret 为 CHANGE_ME，请修改）。
+# 启动后即可访问 http://<服务器IP>:9090。secret 默认留空，首次打开面板无需密钥；
+# 正式部署务必设置：控制器绑定 [::]:9090 且 allow-lan: true，空密钥等同同网段任何人都能操控 mihomo。
 
 allow-lan: true
 bind-address: '*'
@@ -18,7 +19,7 @@ mode: rule
 log-level: warning
 
 external-controller: '[::]:9090'
-secret: "CHANGE_ME"
+secret: ""        # 留空：首次访问免认证；正式部署务必改成随机密钥
 external-ui: ui
 external-ui-name: Zashboard
 external-ui-url: https://gh-proxy.com/https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip
