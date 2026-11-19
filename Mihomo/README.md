@@ -40,13 +40,18 @@
 
 ## 文件说明
 
-`assets/` 下所有源文件统一以 `.template` 结尾，表示这是**供脚本复制 / 渲染的模板**，不是可以直接放进系统使用的最终文件。部署时脚本把它们复制到各自的部署路径，目标文件名都不带 `.template`（例如 `nftables.conf.template` → `/etc/nftables.nft`、`config.yaml.template` → `/etc/mihomo/config.yaml`、`network-optimization.template` → `/etc/network/if-up.d/network-optimization`），`.template` 文件本身不会被执行。这样在目录里一眼就能把「源模板」和「脚本本体 / 部署产物」区分开。所有 `cp` 都显式写出目标文件名，不用「复制到目录」的写法（那会让目标继承 `.template` 后缀）；服务启动前脚本还会自检这些目标文件确实存在。
+`assets/` 下源文件分两类，靠文件名后缀区分：
 
-唯一例外是全局 `ll` 命令：只有一行，由 `install_ll_command()` 在脚本里用 heredoc 内联生成到 `/usr/local/bin/ll`，不占 `assets/` 文件（见第 10 节）。`.template` 约定是给大段、需要单独审阅 / 编辑的配置与脚本用的；一行内容单独做成资产，只会多一个要随脚本分发、还要小心目标文件名的文件，不划算。
+- **`.template` 后缀 = 需要脚本渲染**：`nftables.conf.template`、`sysctl.conf.template` 这两个要被 `sed` 把占位的 `eth0` 替换成实际网卡名。部署时复制到不带后缀的目标路径（`→ /etc/nftables.nft`、`→ /etc/sysctl.d/99-network-gateway.conf`），`.template` 本身不会被执行。
+- **无后缀 = 原样拷贝**：`config.yaml`、`logrotate.conf`、`mihomo-service`、`network-optimization`、`update-ipv6-set.sh` 这五个脚本不做任何替换，直接 `cp` 到部署路径（目标名与源名一致或已显式写全，如 `assets/config.yaml` → `/etc/mihomo/config.yaml`、`assets/update-ipv6-set.sh` → `/etc/periodic/15min/update-ipv6-set`）。`update-ipv6-set.sh` 带 `.sh` 只为在源目录里标明它是 shell 脚本，`cp` 后目标名不带 `.sh`、照常 `chmod +x` 由 crond 执行。
+
+之前 `assets/` 下**所有**文件都挂 `.template`，但只有上面两个真会被渲染——其余五个是纯 `cp`，挂后缀名不副实，还两次带来「`cp` 到目录时目标继承 `.template` 后缀」的坑（`update-ipv6-set`、`config.yaml` 各踩过一次），故按「后缀 = 需要渲染」收紧，原样拷贝的一律用真实名。所有 `cp` 都显式写出目标文件名，不用「复制到目录」的写法；服务启动前脚本还会自检这些目标文件确实存在。
+
+唯一例外是全局 `ll` 命令：只有一行，由 `install_ll_command()` 在脚本里用 heredoc 内联生成到 `/usr/local/bin/ll`，不占 `assets/` 文件（见第 10 节）。一行内容单独做成资产，只会多一个要随脚本分发、还要小心目标文件名的文件，不划算。
 
 ### 1. install-mihomo-alpine.sh
 
-Alpine 系统 mihomo 旁路网关一键安装脚本（v1.8.0）。
+Alpine 系统 mihomo 旁路网关一键安装脚本（v1.9.0）。
 
 **主要功能**：
 - 更换官方源为南大镜像（只换域名、补 community）、`apk update` + `apk upgrade`，升级后复查内核、需要重启则提示退出；一次装好全部随附工具（见「随附工具」）；不装 radvd
@@ -78,7 +83,7 @@ ALPINE_VERSION=3.23 MIHOMO_VERSION=v1.19.22 ./install-mihomo-alpine.sh
 ```
 安装完成的日志会打印实际使用的 Alpine 与 mihomo 版本。
 
-### 2. assets/config.yaml.template
+### 2. assets/config.yaml
 
 mihomo **最简可启动**配置模板（已用 `mihomo -t` 校验通过，v1.19.22）。
 
@@ -121,7 +126,7 @@ mihomo **最简可启动**配置模板（已用 `mihomo -t` 校验通过，v1.19
 
 **应用方式**：`install-mihomo-alpine.sh` 会先备份已有的 `/etc/sysctl.d/99-network-gateway.conf` 为 `.bak.<时间戳>`，再部署模板（`eth0` 替换为实际网卡名）并执行 `sysctl -p`。脚本会 best-effort 加载 `tcp_bbr` / `sch_fq` 模块；若内核不支持导致 `sysctl -p` 失败，会醒目报错退出，不静默跳过。
 
-### 4. assets/network-optimization.template
+### 4. assets/network-optimization
 
 网卡硬件层优化脚本（if-up.d / hotplug）。
 
@@ -136,7 +141,7 @@ mihomo **最简可启动**配置模板（已用 `mihomo -t` 校验通过，v1.19
 
 **与 sysctl 的区别**：
 - sysctl：内核协议栈层参数，持久化配置
-- network-optimization.template：网卡驱动层参数，需要随网卡启动执行
+- network-optimization：网卡驱动层参数，需要随网卡启动执行
 
 **部署方式**：复制到 `/etc/network/if-up.d/`，每次网卡启动时自动执行。
 
@@ -180,15 +185,15 @@ dig @<网关IP> example.com                          # 返回 fake-ip 即说明�
 
 若以后确实需要旁路由完整接管 IPv6：`apk add radvd`，自行写 `/etc/radvd.conf`（宣告本机 link-local / ULA 为高优先级网关、RDNSS 指向本机），`rc-update add radvd default`，并在 `assets/nftables.conf.template` 的 ICMPv6 放行清单补 `nd-router-solicit` 及 MLD 相关类型。注意客户端的 IPv6 默认网关要指向本机；双栈 `masquerade`（NAT6）在上面第 5 节已具备。
 
-### 7. assets/mihomo-service.template
+### 7. assets/mihomo-service
 
 mihomo OpenRC 服务脚本：启动 / 停止 / reload / 状态检查。部署到 `/etc/init.d/mihomo`。`depend()` 里用 `after nftables`（不是并不存在的 `firewall`）；`start_pre()` 只创建 `/var/log/mihomo` —— `-d /etc/mihomo` 让数据（proxy_providers / ui / cache）都落在配置目录，`/run/mihomo`、`/var/lib/mihomo` 是用不到的空目录，不再创建。
 
-### 8. assets/logrotate.conf.template
+### 8. assets/logrotate.conf
 
 mihomo 日志轮转配置：`daily` 轮转、保留 7 份、`compress` + `delaycompress`、`missingok` / `notifempty` / `copytruncate`。部署到 `/etc/logrotate.d/mihomo`。
 
-### 9. assets/update-ipv6-set.template
+### 9. assets/update-ipv6-set.sh
 
 动态更新 IPv6 直连网段到防火墙集合 `local_ipv6_list`。
 

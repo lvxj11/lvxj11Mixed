@@ -8,7 +8,7 @@ set -e
 
 # 脚本信息
 SCRIPT_NAME="install-mihomo-alpine.sh"
-SCRIPT_VERSION="1.8.0"
+SCRIPT_VERSION="1.9.0"
 
 # 系统配置变量
 TIMEZONE="Asia/Shanghai"
@@ -288,7 +288,7 @@ configure_nftables() {
     log "配置nftables防火墙..."
     local nftables_config="/etc/nftables.nft"
     require_asset "${ASSETS_DIR}/nftables.conf.template"
-    require_asset "${ASSETS_DIR}/update-ipv6-set.template"
+    require_asset "${ASSETS_DIR}/update-ipv6-set.sh"
 
     if [ -f "${nftables_config}" ]; then
         local timestamp=$(date '+%Y%m%d%H%M%S')
@@ -307,7 +307,7 @@ configure_nftables() {
     # 安装 IPv6 网段更新脚本
     log "安装 IPv6 网段更新脚本..."
     mkdir -p /etc/periodic/15min
-    cp "${ASSETS_DIR}/update-ipv6-set.template" /etc/periodic/15min/update-ipv6-set
+    cp "${ASSETS_DIR}/update-ipv6-set.sh" /etc/periodic/15min/update-ipv6-set
     chmod +x /etc/periodic/15min/update-ipv6-set
     log "IPv6 网段更新脚本安装完成"
 }
@@ -338,9 +338,9 @@ configure_sysctl() {
 install_network_optimization_script() {
     log "安装网络优化脚本..."
     local if_up_dir="/etc/network/if-up.d"
-    require_asset "${ASSETS_DIR}/network-optimization.template"
+    require_asset "${ASSETS_DIR}/network-optimization"
     mkdir -p "${if_up_dir}"
-    cp "${ASSETS_DIR}/network-optimization.template" "${if_up_dir}/network-optimization"
+    cp "${ASSETS_DIR}/network-optimization" "${if_up_dir}/network-optimization"
     chmod +x "${if_up_dir}/network-optimization"
     log "网络优化脚本安装完成"
 }
@@ -446,17 +446,17 @@ download_mihomo() {
 
 install_mihomo_service() {
     log "安装mihomo服务..."
-    require_asset "${ASSETS_DIR}/mihomo-service.template"
-    cp "${ASSETS_DIR}/mihomo-service.template" "${MIHOMO_SERVICE}"
+    require_asset "${ASSETS_DIR}/mihomo-service"
+    cp "${ASSETS_DIR}/mihomo-service" "${MIHOMO_SERVICE}"
     chmod +x "${MIHOMO_SERVICE}"
     log "mihomo服务安装完成"
 
     # 确保配置文件存在；已存在的用户配置不覆盖
     if [ ! -f "${MIHOMO_CONFIG_DIR}/config.yaml" ]; then
-        require_asset "${ASSETS_DIR}/config.yaml.template"
+        require_asset "${ASSETS_DIR}/config.yaml"
         log "配置文件不存在，正在添加..."
         mkdir -p "${MIHOMO_CONFIG_DIR}"
-        cp "${ASSETS_DIR}/config.yaml.template" "${MIHOMO_CONFIG_DIR}/config.yaml"
+        cp "${ASSETS_DIR}/config.yaml" "${MIHOMO_CONFIG_DIR}/config.yaml"
         log "mihomo配置文件添加完成"
     else
         log "配置文件已存在，保留不覆盖: ${MIHOMO_CONFIG_DIR}/config.yaml"
@@ -465,8 +465,8 @@ install_mihomo_service() {
 
 create_logrotate_config() {
     log "创建日志轮转配置..."
-    require_asset "${ASSETS_DIR}/logrotate.conf.template"
-    cp "${ASSETS_DIR}/logrotate.conf.template" "${LOGROTATE_CONFIG}"
+    require_asset "${ASSETS_DIR}/logrotate.conf"
+    cp "${ASSETS_DIR}/logrotate.conf" "${LOGROTATE_CONFIG}"
     log "日志轮转配置文件复制完成"
 }
 
