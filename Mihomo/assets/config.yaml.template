@@ -1,217 +1,74 @@
-proxy-providers:
-  机场1:
-    type: http
-    url: "订阅地址"
-    path: ./proxy_providers/jc1.yaml
-    interval: 3600
-    proxy: DIRECT
-    size-limit: 0
-    header:
-      User-Agent:
-      - "Clash/v1.18.0"
-      - "mihomo/1.19.22"
-      # - "ninja"
-    health-check:
-      enable: true
-      url: https://www.gstatic.com/generate_204
-      interval: 300
-      timeout: 5000
-      lazy: true
-      expected-status: 204
-custom_anchors:
-  ip: &ip {type: http, interval: 86400, behavior: ipcidr, format: mrs}
-  domain: &domain {type: http, interval: 86400, behavior: domain, format: mrs}
-  class: &class {type: http, interval: 86400, behavior: classical, format: text}
-  direct_dns: &direct_dns
-    - https://dns.alidns.com/dns-query
-    - https://doh.pub/dns-query
-  proxy_dns_only_ipv4: &proxy_dns_only_ipv4
-    - "https://dns.google/dns-query#🚀 默认代理&disable-ipv6=true"
-    - "https://dns.cloudflare.com/dns-query#🚀 默认代理&disable-ipv6=true"
+# mihomo 最简可启动配置（模板）
+#
+# 用途：脚本安装后能立即启动 mihomo 并访问面板（Zashboard）。
+# 这是「最简可启动」基线，只保留能让 mihomo 跑起来 + 面板可访问的最小内容。
+# 正式配置（订阅 / 代理组 / 规则 / rule-providers / 机场分流等）由用户后期自行配置，
+# 参考原完整版（git history 有，或按 mihomo 官方 wiki）。
+#
+# 已用 mihomo -t 校验（v1.19.22）：test is successful。
+# 注意：proxies 里不能用保留名 DIRECT（mihomo 报 proxy DIRECT is the duplicate name），
+# 所以这里的直连代理命名为「直连」。
+#
+# 保留面板 UI 配置（external-controller / secret / external-ui-*），
+# 启动后即可访问 http://<服务器IP>:9090（secret 为 CHANGE_ME，请修改）。
+
 allow-lan: true
 bind-address: '*'
 mode: rule
 log-level: warning
+
 external-controller: '[::]:9090'
-dns:
-  enable: true
-  ipv6: true
-  enhanced-mode: fake-ip # redir-host
-  fake-ip-range: 198.18.128.1/17
-  use-hosts: true
-  fallback-filter:
-    geoip: true
-    ipcidr: [240.0.0.0/4, 0.0.0.0/32]
-  # 监听 1053 而非 53：53 端口的入站 DNS 由 nftables 在 prerouting 里 redirect 到 1053。
-  # 原因：网关侧的 dns-hijack 只作用于经 tun0 进入的流量，而 LAN/上游经 eth0 送来、
-  # 目的 IP 是网关自身:53 的 DNS 不走 tun，靠这条 redirect 劫持到本机 1053 上的 mihomo。
-  # 双栈通用：inet 表一条 redirect 规则同时覆盖 IPv4/IPv6 的 53。
-  listen: '[::]:1053'
-  fake-ip-filter:
-    - RULE-SET,dns_real_ip,real-ip
-    - RULE-SET,custom_proxy_domain,fake-ip
-    - RULE-SET,gfw_domain,fake-ip
-    - MATCH,real-ip
-  fake-ip-filter-mode: rule
-  respect-rules: false
-  prefer-h3: false
-  use-system-hosts: true
-  default-nameserver:
-    - "223.5.5.5#disable-ipv6=true"
-    - "119.29.29.29#disable-ipv6=true"
-  proxy-server-nameserver: *direct_dns
-  nameserver: *direct_dns
-  direct-nameserver: *direct_dns
-  nameserver-policy:
-    "rule-set:dns_real_ip": *proxy_dns_only_ipv4    # 关键字中有冒号，添加双引号防止错误解析
-proxies:
-  - {name: 直连, type: direct}
-proxy-groups:
-  # 使用单引号防止正则表达式中转义符被提前转义
-  - {name: 🚀 默认代理, type: select, proxies: [🔯 香港故转, 🔯 亚洲故转, ♻️ 香港自动, ♻️ 亚洲自动, 🔯 美国故转, ♻️ 自动选择, 🇭🇰 香港节点, 🌏 亚洲节点, 🇺🇸 美国节点, 🌐 全部节点, 直连]}
-  - {name: 🤖 ChatGPT, type: select, proxies: [🔯 亚洲故转, ♻️ 亚洲自动, 🔯 美国故转, 🌏 亚洲节点, 🇺🇸 美国节点, 🌐 全部节点, 直连]}
-  - {name: 🎵 TikTok, type: select, proxies: [🔯 亚洲故转, ♻️ 亚洲自动, 🔯 美国故转, 🌏 亚洲节点, 🇺🇸 美国节点, 🌐 全部节点, 直连]}
-  - {name: 🎯 直连, type: select, proxies: [直连, 🚀 默认代理]}
-  - {name: 🐟 漏网之鱼, type: select, proxies: [直连, 🚀 默认代理, 🔯 香港故转, 🔯 亚洲故转, ♻️ 香港自动, ♻️ 亚洲自动, 🔯 美国故转, ♻️ 自动选择, 🇭🇰 香港节点, 🌏 亚洲节点, 🇺🇸 美国节点, 🌐 全部节点]}
-  - {name: 🇭🇰 香港节点, type: select, include-all: true, filter: '(?i)港|HK|Hong\s?Kong'}
-  - {name: 🔯 香港故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: '(?i)港|HK|Hong\s?Kong'}
-  - {name: ♻️ 香港自动, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: '(?i)港|HK|Hong\s?Kong'}
-  - {name: 🌏 亚洲节点, type: select, include-all: true, filter: '(?i)新加坡|SG|Singapore|日|JP|Japan|韩|KR|Korea|台|TW|Taiwan', exclude-filter: '尼'}
-  - {name: 🔯 亚洲故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: '(?i)新加坡|SG|Singapore|日|JP|Japan|韩|KR|Korea|台|TW|Taiwan', exclude-filter: '尼'}
-  - {name: ♻️ 亚洲自动, type: url-test, include-all: true, tolerance: 20, interval: 300, filter: '(?i)新加坡|SG|Singapore|日|JP|Japan|韩|KR|Korea|台|TW|Taiwan', exclude-filter: '尼'}
-  - {name: 🇺🇸 美国节点, type: select, include-all: true, filter: '(?i)美|US|United\\s?States|America', exclude-filter: '亚'}
-  - {name: 🔯 美国故转, type: fallback, include-all: true, tolerance: 20, interval: 300, filter: '(?i)美|US|United\\s?States|America', exclude-filter: '亚'}
-  - {name: ♻️ 自动选择, type: url-test, include-all: true, tolerance: 20, interval: 300, exclude-filter: '直连|剩余|套餐|官网|邮箱|异常|已用|流量|到期|最新'}
-  - {name: 🌐 全部节点, type: select, include-all: true}
-rules:
-  # 规则越少速度越快，请删除或注释不需要的规则，也可以添加自己需要的规则，谨慎添加条目很多的规则集。
-  - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT    # 禁用QUIC
-  - RULE-SET,custom_direct_domain,🎯 直连
-  - RULE-SET,custom_proxy_domain,🚀 默认代理
-  - RULE-SET,ai,🤖 ChatGPT
-  - RULE-SET,tiktok_domain,🎵 TikTok
-  - RULE-SET,gfw_domain,🚀 默认代理
-  - RULE-SET,telegram_ip,🚀 默认代理,no-resolve
-  - RULE-SET,netflix_ip,🚀 默认代理,no-resolve
-  - RULE-SET,google_ip,🚀 默认代理,no-resolve
-  - MATCH,🐟 漏网之鱼
-rule-providers: 
-  ai: {  <<: *domain, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs" }
-  tiktok_domain: { <<: *domain, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs"}
-  gfw_domain: { <<: *domain, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/gfw.mrs"}
-  google_ip: { <<: *ip, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/google.mrs"}
-  telegram_ip: { <<: *ip, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"}
-  netflix_ip: { <<: *ip, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/netflix.mrs"}
-  cn_ip: { <<: *ip, url: "https://gh-proxy.com/https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs"}
-  custom_direct_domain:
-    type: inline
-    behavior: domain
-    payload:
-      - '+.syncthing.net'
-      - '+.cloudreve.org'
-  custom_proxy_domain:
-    type: inline
-    behavior: domain
-    payload:
-      - 'api.themoviedb.org'
-      # 需代理机场官网
-      - '+.surfcloud.dev'
-      - '+.laomao.biz'
-  dns_real_ip:
-    type: inline
-    behavior: domain
-    payload:
-      - '+.gvt1.com'
-      - '+.googleapis.com'
-      - '+.gstatic.com'
-      - '+.xn--ngstr-lra8j.com'
-find-process-mode: off
-# interface-name: eth0
-ipv6: true
-unified-delay: false
-tcp-concurrent: true
-disable-keep-alive: false
-keep-alive-idle: 600
-keep-alive-interval: 15
+secret: "CHANGE_ME"
 external-ui: ui
 external-ui-name: Zashboard
 external-ui-url: https://gh-proxy.com/https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip
-secret: "CHANGE_ME"
-# port: 7890
-# socks-port: 7891
+
 mixed-port: 7892
-# redir-port: 7893
-# tproxy-port: 7894
-authentication:
-  - user:CHANGE_ME
+
+# DNS：旁路网关核心，fake-ip 模式；listen 用 53（与 tun.dns-hijack 的 any:53 匹配）。
+dns:
+  enable: true
+  ipv6: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.128.1/17
+  listen: '[::]:53'
+  default-nameserver:
+    - 223.5.5.5
+  nameserver:
+    - 223.5.5.5
+
+# 最简代理（占位）：只有一个直连，后期替换为真实订阅/节点。
+proxies:
+  - name: 直连
+    type: direct
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [直连]
+rules:
+  - MATCH,PROXY
+
+# TUN：旁路网关核心。auto-redirect 让 LAN 的 dport 53 进 tun，dns-hijack 在 tun 内接管。
+# route-exclude-address 保证回包到内网客户端不进 TUN（走 LAN 直发），不含 RA 动态前缀
+# （2408:...:db91::/64 等由 RA 生成、会变，靠 mihomo auto-redirect 的 ip6 daddr return 动态排除）。
 tun:
   enable: true
   device: tun0
   stack: mixed
-  # 本机自产 DNS（如 mihomo 自身、本机进程）经 tun0 时在此被接管，与 nftables
-  # prerouting 的「eth0 入站 53 → 1053」分工不同、互不重复：那条管外部经网关转发的
-  # DNS，这条管本机发出的 DNS。两者都指向同一个 mihomo DNS 实例（1053）。
   dns-hijack:
     - any:53
     - tcp://any:53
   mtu: 1400
-  gso: true
-  gso-max-size: 65536
   auto-route: true
   auto-redirect: true
   auto-detect-interface: true
-  udp-timeout: 300
-  iproute2-table-index: 2022
-  iproute2-rule-index: 9000
-  endpoint-independent-nat: false
-  route-exclude-address-set:
-    - cn_ip
   route-exclude-address:
-    # IPv4 私有地址段 (RFC 1918)
-    - 10.0.0.0/8              # 常用于大型企业、校园网、公共 Wi-Fi
-    - 172.16.0.0/12           # 移动热点、部分企业内网
-    - 192.168.0.0/16          # 绝大多数家用路由器默认网段
-    # IPv4 特殊保留地址
-    - 127.0.0.0/8             # 本地回环 (Loopback)，确保访问 127.0.0.1 正常
-    - 100.64.0.0/10           # 运营商级 NAT (CGNAT)，很多大内网宽带/移动数据使用
-    - 169.254.0.0/16          # 链路本地地址 (APIPA)，当 DHCP 获取不到 IP 时自动分配的地址
-    # IPv6 私有/保留地址
-    - fc00::/7                # 唯一本地地址 (ULA)，IPv6 的私有网段
-    - fe80::/10               # 链路本地地址 (Link-Local)，用于局域网内邻居发现
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+    - fc00::/7
+    - fe80::/10
     - ::1/128
-sniffer:
-  enable: true
-  force-dns-mapping: false
-  parse-pure-ip: false
-  skip-domain:
-    - Mijia Cloud
-    - "dlg.apple.com"
-    - "localhost.ptest.home.arpa"
-  sniff:
-    HTTP:
-      port:
-        - "80"
-        - "8080"
-      override-destination: true
-    TLS:
-      port:
-        - "443"
-        - "8443"
-      override-destination: true
-    QUIC:
-      port:
-        - "443"
-        - "8443"
-      override-destination: true
-profile:
-  store-selected: true
-  store-fake-ip: true
-geodata-mode: false
-geodata-loader: standard
-geox-url:
-  geosite: https://gh-proxy.com/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat
-  mmdb: https://gh-proxy.com/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country-lite.mmdb
-  geoip: https://gh-proxy.com/https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat
-  asn: https://gh-proxy.com/https://github.com/xishang0128/geoip/releases/download/latest/GeoLite2-ASN.mmdb
-geo-auto-update: true
-geo-update-interval: 24

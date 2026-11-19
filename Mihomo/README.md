@@ -2,7 +2,7 @@
 
 ## 目录概述
 
-在已安装好的 Alpine Linux 3.x（同一大版本）上快速部署 mihomo 旁路网关：一键脚本安装 mihomo、配置 nftables / TUN / 系统网络参数，并带上完整的示例配置与配套资源文件。
+在已安装好的 Alpine Linux 3.x（同一大版本）上快速部署 mihomo 旁路网关：一键脚本安装 mihomo、配置 nftables / TUN / 系统网络参数，并带上最简可启动配置模板与配套资源文件。
 
 ## 安装前须知
 
@@ -15,7 +15,7 @@
 - 换源后执行 `apk update` + `apk upgrade`。若源指向 `latest-stable` / `edge` 滚动版本会直接报错退出（避免跨大版本）；cloud-init 镜像若只启用 main，会自动补上 community（`yq-go` 等包在 community）
 - 优先取默认路由所在网卡（排除 `tun` / `veth` / `docker` 等虚拟接口），并把各模板里的 `eth0` 替换成实际网卡名
 - `assets/` 里的文件都是必需的：缺失一律报错退出，不会「警告后继续」产出残缺系统。请从脚本所在目录连同 `assets/` 一起取用，不要只拷脚本
-- 安装后必须把 `/etc/mihomo/config.yaml` 里的订阅占位符换成真实订阅地址（见下文）
+- 安装后 mihomo 以「最简可启动」配置启动（面板可访问、TUN / DNS 接管就绪）；正式配置（订阅 / 节点 / 规则）与 `secret` 需自行编辑 `/etc/mihomo/config.yaml`，详见第 2 节
 
 ## 随附工具
 
@@ -46,7 +46,7 @@
 
 ### 1. install-mihomo-alpine.sh
 
-Alpine 系统 mihomo 旁路网关一键安装脚本（v1.6.0）。
+Alpine 系统 mihomo 旁路网关一键安装脚本（v1.7.0）。
 
 **主要功能**：
 - 更换官方源为南大镜像（只换域名、补 community）、`apk update` + `apk upgrade`，升级后复查内核、需要重启则提示退出；一次装好全部随附工具（见「随附工具」）；不装 radvd
@@ -80,16 +80,15 @@ ALPINE_VERSION=3.23 MIHOMO_VERSION=v1.19.22 ./install-mihomo-alpine.sh
 
 ### 2. assets/config.yaml.template
 
-mihomo 完整配置示例。
+mihomo **最简可启动**配置模板（已用 `mihomo -t` 校验通过，v1.19.22）。
 
-**主要内容**：
-- `proxy-providers`：机场订阅（`url`、`interval`、健康检查），按需自动更新
-- 详细的 DNS 配置（DoH、fake-ip、域名策略等）
-- 丰富的代理组（香港、亚洲、美国节点，fallback / url-test 等）
-- 规则集配置（AI、TikTok、GitHub、Google、YouTube、Telegram 等，来自 meta-rules-dat）
-- TUN 模式配置（自动路由、自动重定向、大 MTU）
-- Sniffer 协议检测（HTTP / TLS / QUIC）
-- 外部 UI 支持（Zashboard）、地理位置数据自动更新
+只保留能让 mihomo 启动 + 面板可访问 + TUN/DNS 接管的最小内容：
+
+- 面板（Zashboard）：`external-controller`、`secret`、`external-ui-*`
+- DNS（旁路网关核心，fake-ip）：`dns.listen: '[::]:53'`，与 `tun.dns-hijack` 端口一致
+- 最简代理（占位 `直连`，后期替换为真实订阅 / 节点）
+- TUN（自动路由、自动重定向、`dns-hijack` 接管 53、回包排除内网段）
+- 不含 `proxy-providers` / `rule-providers` / 丰富代理组 —— 这些由用户后期自行配置（参考 git history 的完整版或 mihomo 官方 wiki）
 
 **关键默认值**：
 
@@ -98,9 +97,12 @@ mihomo 完整配置示例。
 | `external-controller` | `[::]:9090` |
 | `secret` | `CHANGE_ME`（**务必修改**） |
 | `mixed-port` | `7892` |
-| `proxy-providers.机场1.url` | `"订阅地址"`（占位符，**务必替换**） |
+| `dns.listen` | `[::]:53`（与 `tun.dns-hijack: any:53` 匹配，**不要改成 1053**） |
 
-**注意**：订阅地址不是环境变量，请直接编辑 `/etc/mihomo/config.yaml` 里 `proxy-providers` 的 `url`（把 `"订阅地址"` 换成真实订阅链接），或在 `proxy-groups` 里直接写死代理服务器。脚本不会覆盖已存在的 `config.yaml`。
+**注意**：
+- 脚本安装后 mihomo 即用此最简配置启动、面板可访问；正式配置（订阅 / 节点 / 规则集）自行编辑 `/etc/mihomo/config.yaml` 后 `rc-service mihomo restart`
+- 脚本**不会覆盖已存在的** `config.yaml`：你改过的正式配置在重装脚本时保留
+- `proxies` 里不能用 mihomo 保留名 `DIRECT`（会报 `proxy DIRECT is the duplicate name`），故模板里直连代理命名为「直连」
 
 ### 3. assets/sysctl.conf.template
 
@@ -150,21 +152,20 @@ nftables 防火墙与 NAT 规则配置。
 - `nat` 表对出口 `eth0` 做 `masquerade`，**同时作用于 IPv4 和 IPv6**
   - `table inet` 让 `masquerade` 双栈生效（Linux >= 5.2）。旁路由必须双栈都做伪装：否则经本机转发的 IPv6 流量源地址仍是客户端地址，回包会被主路由直接送回客户端、绕过本机，形成非对称路由（能 ping 通但网页打不开）。因此**不要**加 `meta nfproto ipv4` 限定，也不要把 `table inet` 改成 `table ip`
   - `masquerade` 是「动态」的：出口前缀变化（如 DHCPv6-PD 重拨）时自动跟随，无需改规则；`update-ipv6-set` 维护的是 input 链的允许集合，与它不是一回事
-- `nat` 表 `prerouting` 链做 **DNS 劫持（53 → 1053，双栈）**
-  - 规则：`iifname "eth0" meta l4proto { tcp, udp } th dport 53 redirect to :1053`。用 `redirect`（`redirect to :<port>`）而不是 DNAT：它是「目的地址 = 本机」的 DNAT 特例（内核 ≥ 3.19，inet 表 NAT 需 ≥ 5.2），只改端口、不改地址族，所以一条 inet 规则就同时覆盖 IPv4 + IPv6，无需分别写 `ip/ip6` 两个目标地址。`redirect to 1053`（无冒号）同样合法、功能一致，这里用带冒号写法与 `nft list ruleset` 回显及 man page 示例保持一致
-  - **与 `tun.dns-hijack` 的分工**：`dns-hijack` 只作用于**已进入 tun0** 的流量，`auto-redirect` 只作用于**本机转发**的流量，两者都覆盖不到「经 eth0 进入、目的端口 53、目的 IP 是原值」这条路径——而当上游用策略路由把 DNS 按 mark 送到网关时，DNS 包正是走这条路，mihomo 不会接管。这条 prerouting 规则补的就是这一段。两者不重复、不冲突
-  - 改 `dns.listen` 从 `53` 到 `1053` 是这条劫持的**前提**：1053 上必须有东西在听（mihomo 自己），否则 DNS 请求会被劫到没人接的端口、直接超时失败
-  - `input` 链**无需**为 1053 额外放行：redirect 后目标端口是 1053，但包仍从 eth0 进入，仍命中 input 链里的私网放行规则；若客户端源不在放行集合，53 同样不会被放行——行为与劫持前一致，不额外开洞
+- **DNS 劫持由 mihomo 自己完成，网关侧不再额外做端口改写**：LAN 客户端把 DNS 发给主路由（或任意上游 DNS），主路由用 `dst-nat`（TCP + UDP）把目的地址**整个改写**成 mihomo 网关的 53。mihomo 的 `auto-redirect` 在 netfilter 层把 `dport 53` 的包 **dnat 进 tun0**，`tun.dns-hijack: any:53` 在 tun 内拦下并交给 mihomo 的 DNS 解析器（`dns.listen: '[::]:53'`）。三层配合完成接管
+  - **因此网关侧 `nftables.nft` 不再有 `prerouting` DNS 劫持规则**——之前试过用 `redirect to :1053` 手动劫持，但 `auto-redirect` 自己也会装一套 `dport 53` dnat 规则，两者抢包导致 IPv6 DNS 查询不可预测地失败。回退后由 mihomo 统一接管，问题消失
+  - **`dns.listen` 用 53，不是 1053**：`tun.dns-hijack` 在 tun 内拦的是 `dport 53`，必须与 `dns.listen` 端口一致，改成 1053 会让劫持下来的查询找不到监听者
+  - 主路由用 `dst-nat`（改目的地址）而非 mark 分流（只改路由不改目的 IP）：mark 方式下 DNS 包到网关时目的地址仍是原值，`auto-redirect` 的 `ip6 saddr @inet6_local_address_set dport 53 dnat` 匹配的是**源地址**在集合内、目的被改写进 tun——但实测 mark 方式对 IPv6 有太多不可预料的情况。`dst-nat` 简单直接、问题最少，虽然 DNS 与普通流量在主路由上是两套逻辑（dnat vs mark），但这是刻意取舍
 
-**迁移说明（上游用 RouterOS / mangle mark 分流时）**：
-- 上游原有的 `dst-nat`（TCP + UDP，53 → mihomo 网关）**不删也能正常工作**：`redirect` 只匹配「eth0 进 + dport 53」，不看目的 IP 是谁——无论包是被 dst-nat 改写成 `mihomo-gw:53`、还是原目的 `任意IP:53`，到网关后目的端口都是 53，照样命中 redirect → 1053。两种状态功能等价
-- 若要实现「DNS 与普通流量在上游统一成**一套 mark 逻辑**、改网关地址只改路由一处」，则应**删除** dst-nat、改由 mark 分流把「目的 53」也送到网关（端口改写下沉到网关内 nftables 完成）；保留 dst-nat 只是保留了原来的三处配置负担，不影响劫持生效
-- 注意别让上游把「目的 53」单独排除在 mark 分流之外（若已删 dst-nat 走 mark，这条 DNS 就走不到网关、劫持失效）
+**主路由侧（RouterOS 等）**：
+- 用 `dst-nat`（TCP + UDP）把 `dport 53` 的目的地址改写成 mihomo 网关的 53 即可，这是本方案默认且推荐的方式
+- 普通流量仍走原有的 mark 分流到网关；两者分离，但各自简单直接
+- 改网关地址时需同步改 dnat(tcp) + dnat(udp) + 路由三处——这是选择 dst-nat 的代价，可接受
 
 **验证命令**：
 ```bash
-nft list ruleset | grep -A2 'hook prerouting'    # 确认 redirect 规则在
-ss -lunp | grep 1053                              # 确认 mihomo 在听 1053
+nft list ruleset | grep -A3 'hook prerouting'    # 确认 auto-redirect 的 dport 53 dnat 规则在
+ss -lunp | grep 53                                # 确认 mihomo 在听 53（dns.listen）
 dig @<网关IP> example.com                          # 返回 fake-ip 即说明劫持生效
 ```
 
@@ -192,7 +193,7 @@ mihomo 日志轮转配置：`daily` 轮转、保留 7 份、`compress` + `delayc
 
 **功能**：
 - 与主脚本一致，优先取默认路由所在网卡，排除虚拟接口
-- 提取**所有**以 `2` 开头的 IPv6 直连前缀（去重复），逐个维护
+- 提取所有以 `2` 开头的 IPv6 直连前缀；长于 `/60` 的（如 RA 下发的 `/64`）把第 4 段末位十六进制清零、聚合到 `/60` 再加入集合（适配 `/60` 委派前缀，一条覆盖其下所有 `/64`），`/60` 及更短的保持原样；去重复后逐个维护
 - 加入 nftables 集合并设 `24h` 超时；过期剩余时间按 `d/h/m/s` 统一换算成秒，不足 2 小时才删除重建，否则跳过，避免频繁改动
 - 从 `nft list set` 输出里按网段**精确截取自己的 `expires`**，兼容单行 / 多行输出与 `45m`、`1d2h`、`23h59m58s` 等格式（旧版只认 `XhYmZs` 三段，会把 `45m` 误判成「过期时间充足」）
 
@@ -219,7 +220,7 @@ mihomo 日志轮转配置：`daily` 轮转、保留 7 份、`compress` + `delayc
    ./install-mihomo-alpine.sh
    ```
 3. **配置 mihomo**：
-   - 编辑 `/etc/mihomo/config.yaml`，替换订阅地址、修改 `secret`
+   - 编辑 `/etc/mihomo/config.yaml`，添加订阅 / 节点 / 代理组 / 规则，并修改 `secret`
    - 重启服务：`rc-service mihomo restart`
 4. **（可选）IPv6 路由通告**：本方案默认不启用，见第 6 节
 
@@ -274,7 +275,7 @@ API 密钥为 `config.yaml` 里的 `secret`（默认 `CHANGE_ME`，请修改）�
 | mihomo 无法启动 | 脚本会直接报错退出；`tail /var/log/mihomo/mihomo.log` |
 | 防火墙规则 | `nft list ruleset` |
 | 确认双栈伪装是否生效 | `nft list table inet nat` |
-| DNS 劫持不生效（`dig @<网关IP>` 返回真 IP 或超时） | `nft list ruleset \| grep redirect` 确认规则存在；`ss -lunp \| grep 1053` 确认 mihomo 在听 1053；确认 DNS 是否真的被送到了网关——若已删 dst-nat 改走 mark，检查「目的 53」是否仍被 mark 分流到网关（没到网关劫持自然失效）；若保留 dst-nat，确认它指向网关且 dport 为 53 |
+| DNS 劫持不生效（`dig @<网关IP>` 返回真 IP 或超时） | `nft list ruleset \| grep -A3 'hook prerouting'` 确认 auto-redirect 的 `dport 53 dnat` 规则在；`ss -lunp \| grep 53` 确认 mihomo 在听 53（不是 1053）；确认主路由 `dst-nat`（TCP+UDP）确实把 `dport 53` 目的改写成网关的 53 |
 | TUN 模块 | `lsmod | grep tun` |
 | 网络连接 | `ping -c 4 223.5.5.5` |
 | IPv6 网段 | `ip -6 route show` |

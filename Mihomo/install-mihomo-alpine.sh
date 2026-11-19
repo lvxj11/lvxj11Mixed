@@ -8,7 +8,7 @@ set -e
 
 # 脚本信息
 SCRIPT_NAME="install-mihomo-alpine.sh"
-SCRIPT_VERSION="1.6.0"
+SCRIPT_VERSION="1.7.0"
 
 # 系统配置变量
 TIMEZONE="Asia/Shanghai"

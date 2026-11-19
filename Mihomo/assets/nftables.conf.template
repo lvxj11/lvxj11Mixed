@@ -73,26 +73,6 @@ table inet filter {
 # 所以这里不要加 "meta nfproto ipv4" 限定，也不要把 table inet 改成 table ip。
 # masquerade 是「动态」的：出口前缀变化（如 DHCPv6-PD 重拨）时自动跟随，无需改规则。
 table inet nat {
-    # DNS 劫持：把经 eth0 进来、目的端口 53 的 DNS 查询重定向到本机 mihomo 的 DNS 监听端口 1053。
-    #
-    # 为什么需要：mihomo 自带的 dns-hijack 只作用于「已进入 tun0」的流量，
-    # auto-redirect 只作用于「本机转发」的流量，两者都覆盖不到
-    # 「经 eth0 进入、目的 IP 是网关自身（或任意 IP）:53」这条路径 —— 而当上游
-    # （如 RouterOS）用策略路由把 DNS 也按 mark 送到网关时，DNS 包的目的端口
-    # 仍是 53、目的 IP 仍是原值，mihomo 不会接管。这里用 redirect 把 53 → 1053
-    # 补上这一段。
-    #
-    # 为什么用 redirect：它是 DNAT 的「目的地址 = 本机」特例（内核 ≥3.19，inet 表 NAT
-    # 需内核 ≥5.2）。只改端口、不改地址族，因此 inet 表里一条规则就同时覆盖 IPv4 与 IPv6
-    # （双栈），无需像 DNAT 那样分别写 ip/ip6 两个目标地址。
-    #
-    # tcp+udp 都劫：TCP DNS（如 DNS over TCP / 大响应截断后的重试）同样要进 mihomo。
-    chain prerouting {
-        type nat hook prerouting priority dstnat; policy accept;
-
-        iifname "eth0" meta l4proto { tcp, udp } th dport 53 redirect to :1053
-    }
-
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
 

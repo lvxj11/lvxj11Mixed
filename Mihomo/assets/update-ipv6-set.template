@@ -27,7 +27,22 @@ fi
 SET_LIST=$(nft list set inet filter local_ipv6_list 2>/dev/null)
 
 # 提取所有以 2 开头的 IPv6 直连前缀（公网段），逐个维护
-NETWORKS=$(ip -6 route show dev "${PRIMARY_IFACE}" | awk '$1 ~ /^2/ {print $1}' | sort -u)
+NETWORKS=$(ip -6 route show dev "${PRIMARY_IFACE}" \
+| awk '$1 ~ /^2/ {print $1}' \
+| awk -F/ '{
+    if (NF == 2 && $2 + 0 > 60) {
+      split($1, g, ":")
+      if (g[4] == "") {
+        print $1 "/60"
+      } else {
+        g[4] = substr(g[4], 1, length(g[4]) - 1) "0"
+        printf "%s:%s:%s:%s::/60\n", g[1], g[2], g[3], g[4]
+      }
+    } else {
+      print $0
+    }
+  }' \
+| sort -u)
 if [ -z "${NETWORKS}" ]; then
     log "未找到以 2 开头的 IPv6 直连网段"
     exit 0
