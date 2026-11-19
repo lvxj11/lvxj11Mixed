@@ -67,12 +67,14 @@ for NETWORK in ${NETWORKS}; do
 
     if [ -n "${ELEMENT_INFO}" ]; then
         # nft 的剩余时间格式不固定：23h59m58s / 1d2h / 45m / 30s 都要认，
-        # 统一换算成秒再判断，避免旧版只认三段格式导致「45m」被误判为充足
-        EXPIRES_STR=$(echo "${ELEMENT_INFO}" | grep -oE 'expires [0-9dhms]+' | head -n 1 | cut -d' ' -f2)
-        DAYS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+d' | tr -d 'd')
-        HOURS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+h' | tr -d 'h')
-        MINS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+m' | tr -d 'm')
-        SECS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+s' | tr -d 's')
+        # 统一换算成秒再判断，避免旧版只认三段格式导致「45m」被误判为充足。
+        # 带 timeout 的集合元素可能带毫秒尾（如 23h37m31s175ms）：先剥掉 ms 段，
+        # 否则 grep '[0-9]+m' 会同时匹配到「37m」和「175ms」里的「175m」，拼进算术就语法错误。
+        EXPIRES_STR=$(echo "${ELEMENT_INFO}" | grep -oE 'expires [0-9dhms]+' | head -n 1 | cut -d' ' -f2 | sed -E 's/[0-9]+ms//g')
+        DAYS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+d' | head -n 1 | tr -d 'd')
+        HOURS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+h' | head -n 1 | tr -d 'h')
+        MINS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+m' | head -n 1 | tr -d 'm')
+        SECS=$(echo "${EXPIRES_STR}" | grep -oE '[0-9]+s' | head -n 1 | tr -d 's')
         REMAINING=$(( ${DAYS:-0} * 86400 + ${HOURS:-0} * 3600 + ${MINS:-0} * 60 + ${SECS:-0} ))
 
         if [ "${REMAINING}" -ge 7200 ]; then
