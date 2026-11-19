@@ -48,6 +48,17 @@ if [ -z "${NETWORKS}" ]; then
     exit 0
 fi
 
+# mihomo 自动探测只把单个 /64（如 ...:db91::/64）写进 inet mihomo 的
+# inet6_local_address_set，而它的 DNS 劫持规则是
+# 「ip6 saddr @inet6_local_address_set th dport 53 dnat ...」——只认集合里的元素。
+# /60 委派下若还有别的 /64 子网，其客户端 DNS 就匹配不到、劫持失效。
+# 下面在同一段里把该集合内「属于本 /60、掩码长于 /60」的公网元素归一到 /60。
+# mihomo 重载时会重新写回自己的 /64，本脚本每 15 分钟再归一一次即可。
+MIHOMO_SET_LIST=""
+if nft list set inet mihomo inet6_local_address_set > /dev/null 2>&1; then
+    MIHOMO_SET_LIST=$(nft list set inet mihomo inet6_local_address_set 2>/dev/null)
+fi
+
 for NETWORK in ${NETWORKS}; do
     # nft 的 list set 可能把所有元素排在同一行，用 grep 取整行会拿到别的
     # 网段的 expires；这里按「该网段之后、下一个逗号或右花括号之前」精确截取
@@ -75,5 +86,38 @@ for NETWORK in ${NETWORKS}; do
     log "添加 IPv6 网段: ${NETWORK}"
     nft "add element inet filter local_ipv6_list { ${NETWORK} timeout 24h }"
 done
+
+# —— mihomo 集合同步（独立循环，不受上面 local_ipv6_list 剩余时间的 continue 影响）——
+# mihomo 只把单个 /64（...:db91::/64）写进 inet mihomo inet6_local_address_set，
+# 而它的 DNS 劫持规则「ip6 saddr @inet6_local_address_set th dport 53 dnat ...」只认集合元素，
+# 同一 /60 委派下别的 /64 子网就劫持不到。这里把该集合里「归一后等于上面某个 /60」的长掩码元素换成 /60。
+if [ -n "${MIHOMO_SET_LIST}" ]; then
+    # 取形如 2408:8210:6027:db91::/64 的「前 4 段非空 + 掩码长于 /60」元素：
+    # 排除 fd00:1::/64（第 4 段为 1，但它是 ULA，靠下面与 NETWORKS 的 /60 归一比对来排除）；
+    # ULA 网段绝不会出现在 NETWORKS（只取以 2 开头的公网前缀），归一比对天然过滤掉它们。
+    LONG_ELEMS=$(echo "${MIHOMO_SET_LIST}" | \
+        grep -oE '[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+::/[0-9]+' | \
+        awk -F/ '{ if ($2 + 0 > 60) print $1 "/" $2 }')
+    for ELEM in ${LONG_ELEMS}; do
+        # 与上面 /64→/60 同一套归一：清零第 4 段末位十六进制，得到该元素所属的 /60
+        ELEM60=$(echo "${ELEM}" | awk -F/ '{
+            split($1, g, ":")
+            if (g[4] != "") { g[4] = substr(g[4], 1, length(g[4]) - 1) "0" }
+            printf "%s:%s:%s:%s::/60\n", g[1], g[2], g[3], g[4]
+        }')
+        # 只归一属于本机直连公网 /60 的元素；fd00:1::/64 之类归一后不在 NETWORKS，跳过
+        case " ${NETWORKS} " in
+            *" ${ELEM60} "*)
+                nft "delete element inet mihomo inet6_local_address_set { ${ELEM} }" 2>/dev/null || true
+                if echo "${MIHOMO_SET_LIST}" | grep -qF "${ELEM60}"; then
+                    log "mihomo 集合：删除长掩码 ${ELEM}，${ELEM60} 已存在"
+                else
+                    log "mihomo 集合：${ELEM} 归一到 ${ELEM60}"
+                    nft "add element inet mihomo inet6_local_address_set { ${ELEM60} }" 2>/dev/null || true
+                fi
+                ;;
+        esac
+    done
+fi
 
 exit 0

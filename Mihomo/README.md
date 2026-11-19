@@ -46,7 +46,7 @@
 
 ### 1. install-mihomo-alpine.sh
 
-Alpine 系统 mihomo 旁路网关一键安装脚本（v1.7.0）。
+Alpine 系统 mihomo 旁路网关一键安装脚本（v1.8.0）。
 
 **主要功能**：
 - 更换官方源为南大镜像（只换域名、补 community）、`apk update` + `apk upgrade`，升级后复查内核、需要重启则提示退出；一次装好全部随附工具（见「随附工具」）；不装 radvd
@@ -197,6 +197,7 @@ mihomo 日志轮转配置：`daily` 轮转、保留 7 份、`compress` + `delayc
 - 提取所有以 `2` 开头的 IPv6 直连前缀；长于 `/60` 的（如 RA 下发的 `/64`）把第 4 段末位十六进制清零、聚合到 `/60` 再加入集合（适配 `/60` 委派前缀，一条覆盖其下所有 `/64`），`/60` 及更短的保持原样；去重复后逐个维护
 - 加入 nftables 集合并设 `24h` 超时；过期剩余时间按 `d/h/m/s` 统一换算成秒，不足 2 小时才删除重建，否则跳过，避免频繁改动
 - 从 `nft list set` 输出里按网段**精确截取自己的 `expires`**，兼容单行 / 多行输出与 `45m`、`1d2h`、`23h59m58s` 等格式（旧版只认 `XhYmZs` 三段，会把 `45m` 误判成「过期时间充足」）
+- **顺带归一 mihomo 的 `inet mihomo inet6_local_address_set`**：mihomo 只把自动探测到的单个 `/64`（如 `...:db91::/64`）写进该集合，而它的 DNS 劫持规则是 `ip6 saddr @inet6_local_address_set th dport 53 dnat ...`，只认集合元素——`/60` 委派下若还有别的 `/64` 子网，其客户端 DNS 就匹配不到、劫持失效。本脚本对集合里「前 4 段非空、掩码长于 `/60`、且归一后等于本机公网 `/60`」的元素，删长掩码、补 `/60`，与 `local_ipv6_list` 对齐（ULA / 链路本地元素因前 4 段不全 + 归一后不在 `NETWORKS` 而被双重排除，不受影响）。mihomo 重载时会重新写回 `/64`，本脚本每 15 分钟再归一一次即可。这段是**尽力而为**：mihomo 集合不存在时跳过，不影响 `local_ipv6_list` 维护
 
 **部署方式**：`install-mihomo-alpine.sh` 已自动把它复制到 `/etc/periodic/15min/update-ipv6-set` 并赋可执行权限，**无需手动安装**。Alpine 的 `/etc/periodic/15min` 由 crond 定期执行；如需手动触发：
 
