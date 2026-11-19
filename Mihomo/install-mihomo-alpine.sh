@@ -8,7 +8,7 @@ set -e
 
 # 脚本信息
 SCRIPT_NAME="install-mihomo-alpine.sh"
-SCRIPT_VERSION="1.9.0"
+SCRIPT_VERSION="2.0.0"
 
 # 系统配置变量
 TIMEZONE="Asia/Shanghai"
@@ -36,6 +36,11 @@ MIHOMO_BIN_PATH="/usr/local/bin/mihomo"
 GITHUB_API_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
 RELEASES_TAGS_URL="https://api.github.com/repos/MetaCubeX/mihomo/releases/tags"
 RETRY_COUNT=2
+
+# GitHub 下载加速代理（竞速）。直连 GitHub 在国内常慢到 20k/s——能通但不可用，
+# 故默认直连与代理两路并发下载、谁先成功用谁（download_race()）。
+# 设为空字符串可关闭代理这一路（只走直连）：MIHOMO_PROXY= ./install-mihomo-alpine.sh
+MIHOMO_PROXY="${MIHOMO_PROXY:-https://gh-proxy.com}"
 
 # 系统架构映射
 ARCH_MAP="x86_64:amd64 aarch64:arm64 armv7l:armv7 arm:armv7"
@@ -114,6 +119,73 @@ fetch_with_retry() {
             sleep 1
         fi
     done
+    return 1
+}
+
+# 并发竞速下载：直连 GitHub 与（可选的）gh-proxy 代理两路同时起，
+# 谁先成功下载完用谁，杀掉另一路。命中「能通但 20k/s」的场景——代理那路几秒下完即胜出，
+# 无需任何速度阈值。两路都失败才返回 1，由调用方醒目报错退出。
+# $1=标签 $2=原始 URL $3=输出文件（最终只落这一个文件）
+download_race() {
+    local label="$1" url="$2" output="$3"
+    local proxy_url=""
+
+    if [ -n "${MIHOMO_PROXY}" ]; then
+        # gh-proxy.com 形式是前缀拼接：https://gh-proxy.com/<完整原始 URL>
+        proxy_url="${MIHOMO_PROXY%/}/${url}"
+        log "${label}：并发竞速（直连 + 代理 ${MIHOMO_PROXY}）"
+    else
+        log "${label}：代理已关闭（MIHOMO_PROXY 为空），仅直连"
+    fi
+
+    # 只有一路时退化成普通带重试下载
+    if [ -z "${proxy_url}" ]; then
+        fetch_with_retry "${label}" "${url}" "${output}"
+        return $?
+    fi
+
+    local direct_out="${output}.direct" proxy_out="${output}.proxy"
+    local direct_st="${output}.direct.st" proxy_st="${output}.proxy.st"
+    local winner=""
+
+    # 两路并发，各自独立输出文件；退出码写进 .st 状态文件。
+    # 用状态文件而非 kill -0 判完成：后台任务结束后到被 wait 收割前是僵尸进程，
+    # kill -0 仍返回 0，会误判「还在跑」导致死循环。
+    ( wget -qO "${direct_out}" "${url}"; echo $? > "${direct_st}" ) &
+    ( wget -qO "${proxy_out}" "${proxy_url}"; echo $? > "${proxy_st}" ) &
+
+    # 轮询状态文件：先出现且退出码为 0 的胜出
+    while :; do
+        if [ -f "${direct_st}" ] && [ "$(cat "${direct_st}")" = "0" ]; then
+            winner="direct"; break
+        fi
+        if [ -f "${proxy_st}" ] && [ "$(cat "${proxy_st}")" = "0" ]; then
+            winner="proxy"; break
+        fi
+        # 两路都已结束但都非 0 → 都失败
+        if [ -f "${direct_st}" ] && [ -f "${proxy_st}" ]; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [ -n "${winner}" ]; then
+        # 收割两路后台任务，清掉可能残留的输出 / 状态文件
+        wait 2>/dev/null || true
+        if [ "${winner}" = "direct" ]; then
+            log "${label}：直连 GitHub 优先完成"
+            mv "${direct_out}" "${output}"
+        else
+            log "${label}：代理 ${MIHOMO_PROXY} 优先完成"
+            mv "${proxy_out}" "${output}"
+        fi
+        rm -f "${direct_out}" "${proxy_out}" "${direct_st}" "${proxy_st}"
+        return 0
+    fi
+
+    # 两路都失败
+    wait 2>/dev/null || true
+    rm -f "${direct_out}" "${proxy_out}" "${direct_st}" "${proxy_st}"
     return 1
 }
 
@@ -422,8 +494,8 @@ download_mihomo() {
 
     # 下载 / 解压 / 自检全部在临时目录完成，通过后才落位，避免破坏已装二进制
     TMP_DIR=$(mktemp -d /tmp/mihomo-install.XXXXXX)
-    if ! fetch_with_retry "mihomo 二进制下载" "${download_url}" "${TMP_DIR}/mihomo.gz"; then
-        error_exit "下载 mihomo 失败（重试 ${RETRY_COUNT} 次后仍失败）"
+    if ! download_race "mihomo 二进制下载" "${download_url}" "${TMP_DIR}/mihomo.gz"; then
+        error_exit "下载 mihomo 失败（直连与代理均失败）"
     fi
     if ! gunzip -c "${TMP_DIR}/mihomo.gz" > "${TMP_DIR}/mihomo"; then
         error_exit "解压 mihomo 失败，下载文件可能不完整"

@@ -15,6 +15,7 @@
 - 换源后执行 `apk update` + `apk upgrade`。若源指向 `latest-stable` / `edge` 滚动版本会直接报错退出（避免跨大版本）；cloud-init 镜像若只启用 main，会自动补上 community（`yq-go` 等包在 community）
 - 优先取默认路由所在网卡（排除 `tun` / `veth` / `docker` 等虚拟接口），并把各模板里的 `eth0` 替换成实际网卡名
 - `assets/` 里的文件都是必需的：缺失一律报错退出，不会「警告后继续」产出残缺系统。请从脚本所在目录连同 `assets/` 一起取用，不要只拷脚本
+- **下载 mihomo 二进制走「并发竞速」**：直连 GitHub 在国内常慢到 20k/s（能通但不可用），故默认**直连 + `gh-proxy.com` 代理两路同时下载、谁先下完用谁**（`download_race()`），不需要速度阈值。可用 `MIHOMO_PROXY` 环境变量控制：默认 `https://gh-proxy.com`；设为空字符串则关闭代理、只走直连（`MIHOMO_PROXY= ./install-mihomo-alpine.sh`），适合已有自建代理或海外机器。两路都失败才醒目报错退出
 - 安装后 mihomo 以「最简可启动」配置启动（面板免认证可访问、TUN / DNS 接管就绪）；正式配置（订阅 / 节点 / 规则）与 `secret` 需自行补进 `/etc/mihomo/config.yaml`，详见第 2 节
 
 ## 随附工具
@@ -51,7 +52,7 @@
 
 ### 1. install-mihomo-alpine.sh
 
-Alpine 系统 mihomo 旁路网关一键安装脚本（v1.9.0）。
+Alpine 系统 mihomo 旁路网关一键安装脚本（v2.0.0）。
 
 **主要功能**：
 - 更换官方源为南大镜像（只换域名、补 community）、`apk update` + `apk upgrade`，升级后复查内核、需要重启则提示退出；一次装好全部随附工具（见「随附工具」）；不装 radvd
