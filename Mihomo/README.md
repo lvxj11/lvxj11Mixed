@@ -9,7 +9,7 @@
 - 需 **root** 权限；要求 Alpine 3.x、支持 TUN 的内核、可联网
 - **两个版本都可显式钉死以便复现**：
   - `ALPINE_VERSION`：从 `/etc/alpine-release` 读取并用 `case 3.*` 严格校验，只支持 3.x 大版本，跨大版本（如 4.x）直接报错退出、不做兼容；取不到一律醒目报错退出，不猜测、不回退到滚动版本
-  - `MIHOMO_VERSION`：默认从 GitHub `releases/latest` 解析具体 tag；查询/下载失败重试 2 次后醒目报错退出，绝不回退到滚动 tag / 主版本 tag / 猜测版本。显式指定时按该 tag 查发布资源
+  - `MIHOMO_VERSION`：默认从 GitHub `releases/latest` 解析具体 tag；版本查询失败重试 2 次后醒目报错退出，绝不回退到滚动 tag / 主版本 tag / 猜测版本。显式指定时按该 tag 查发布资源。二进制**下载**走并发竞速（直连 + `gh-proxy.com` 代理谁先下完用谁，见下方），两路均失败才报错退出
 - 脚本会检查「运行中的内核」与「已安装内核」是否一致：安装前查一次，`apk upgrade` 后再复查一次；任何一处不一致都会醒目提示「需要重启」并退出，请先 `reboot` 再重跑
 - 把 `/etc/apk/repositories` 里的官方源域名 `dl-cdn.alpinelinux.org` 换成南大镜像 `mirror.nju.edu.cn`（域名以南大官方文档首页写法为准，不带 s）：只换域名、保留版本路径与 main/community/testing 条目，原文件先备份为 `.bak.<时间戳>`；换源是幂等的，重跑安全
 - 换源后执行 `apk update` + `apk upgrade`。若源指向 `latest-stable` / `edge` 滚动版本会直接报错退出（避免跨大版本）；cloud-init 镜像若只启用 main，会自动补上 community（`yq-go` 等包在 community）
@@ -278,7 +278,7 @@ http://<服务器IP>:9090
 | 提示「滚动版本」而退出 | 把 `/etc/apk/repositories` 固定到 `v3.x` 具体版本再运行 |
 | 工具安装失败 | `apk search <包名>` 确认该包在 v3.x 的 main/community 中存在 |
 | 提示「缺少必需的资源文件」 | 从脚本所在目录连同 `assets/` 一起取用，不要只拷脚本 |
-| 版本查询 / 下载反复失败 | 检查网络，或用 `MIHOMO_VERSION=v1.19.22` 显式钉死；脚本重试 2 次后即退出，不会降级 |
+| 版本查询 / 下载反复失败 | 检查网络；用 `MIHOMO_VERSION=v1.19.22` 显式钉死 tag；下载走直连+代理竞速，若代理那路也不可用可 `MIHOMO_PROXY= ./install-mihomo-alpine.sh` 关闭代理后重跑 |
 | `sysctl -p` 失败 | `modprobe tcp_bbr sch_fq` 后重跑，或确认内核支持 BBR / fq |
 | mihomo 无法启动 | 脚本会直接报错退出；`tail /var/log/mihomo/mihomo.log` |
 | 防火墙规则 | `nft list ruleset` |
